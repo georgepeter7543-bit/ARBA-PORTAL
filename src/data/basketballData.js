@@ -199,7 +199,138 @@ export const ADMIN_NAV_LINKS = [
   { name: 'Login' }
 ];
 
-export const PLAYERS_LEADERBOARD = [];
+export const INITIAL_PLAYERS = [
+  {
+    id: 'player-1',
+    name: 'Kelvin Mwita',
+    photoUrl: 'https://images.unsplash.com/photo-1546519638-68e109498ffc?auto=format&fit=crop&w=600&q=80',
+    avatar: 'https://images.unsplash.com/photo-1546519638-68e109498ffc?auto=format&fit=crop&w=600&q=80',
+    image: 'https://images.unsplash.com/photo-1546519638-68e109498ffc?auto=format&fit=crop&w=600&q=80',
+    team: 'Arusha Kings',
+    position: 'SF',
+    pos: 'SF',
+    jersey: 23,
+    age: 24,
+    height: "198 cm / 6'6\"",
+    ppg: 28.4,
+    status: 'Active',
+    isCustom: true
+  },
+  {
+    id: 'player-2',
+    name: 'Baraka Msuya',
+    photoUrl: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=600&q=80',
+    avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=600&q=80',
+    image: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=600&q=80',
+    team: 'Arusha Spurs',
+    position: 'PG',
+    pos: 'PG',
+    jersey: 7,
+    age: 26,
+    height: "188 cm / 6'2\"",
+    ppg: 24.2,
+    status: 'Active',
+    isCustom: true
+  },
+  {
+    id: 'player-3',
+    name: 'Amani Mollel',
+    photoUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=600&q=80',
+    avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=600&q=80',
+    image: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=600&q=80',
+    team: 'Sky Wolves',
+    position: 'SG',
+    pos: 'SG',
+    jersey: 11,
+    age: 23,
+    height: "193 cm / 6'4\"",
+    ppg: 22.8,
+    status: 'Active',
+    isCustom: true
+  },
+  {
+    id: 'player-4',
+    name: 'Juma Mrema',
+    photoUrl: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?auto=format&fit=crop&w=600&q=80',
+    avatar: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?auto=format&fit=crop&w=600&q=80',
+    image: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?auto=format&fit=crop&w=600&q=80',
+    team: 'Northern Zion',
+    position: 'PF',
+    pos: 'PF',
+    jersey: 15,
+    age: 27,
+    height: "203 cm / 6'8\"",
+    ppg: 19.6,
+    status: 'Active',
+    isCustom: true
+  },
+  {
+    id: 'player-5',
+    name: 'Erick Lyimo',
+    photoUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=600&q=80',
+    avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=600&q=80',
+    image: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=600&q=80',
+    team: 'Pentagon Giants',
+    position: 'C',
+    pos: 'C',
+    jersey: 34,
+    age: 25,
+    height: "208 cm / 6'10\"",
+    ppg: 18.5,
+    status: 'Active',
+    isCustom: true
+  },
+  {
+    id: 'player-6',
+    name: 'Rashid Athumani',
+    photoUrl: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?auto=format&fit=crop&w=600&q=80',
+    avatar: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?auto=format&fit=crop&w=600&q=80',
+    image: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?auto=format&fit=crop&w=600&q=80',
+    team: 'Hooperz Basketball',
+    position: 'PG',
+    pos: 'PG',
+    jersey: 3,
+    age: 22,
+    height: "185 cm / 6'1\"",
+    ppg: 21.3,
+    status: 'Active',
+    isCustom: true
+  },
+  {
+    id: 'player-7',
+    name: 'David Mushi',
+    photoUrl: 'https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?auto=format&fit=crop&w=600&q=80',
+    avatar: 'https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?auto=format&fit=crop&w=600&q=80',
+    image: 'https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?auto=format&fit=crop&w=600&q=80',
+    team: 'The City Basketball Club',
+    position: 'SF',
+    pos: 'SF',
+    jersey: 10,
+    age: 26,
+    height: "196 cm / 6'5\"",
+    ppg: 20.7,
+    status: 'Active',
+    isCustom: true
+  },
+  {
+    id: 'player-8',
+    name: 'Innocent Shirima',
+    photoUrl: 'https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?auto=format&fit=crop&w=600&q=80',
+    avatar: 'https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?auto=format&fit=crop&w=600&q=80',
+    image: 'https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?auto=format&fit=crop&w=600&q=80',
+    team: 'Pamoja Basketball',
+    position: 'SG',
+    pos: 'SG',
+    jersey: 8,
+    age: 24,
+    height: "191 cm / 6'3\"",
+    ppg: 17.9,
+    status: 'Active',
+    isCustom: true
+  }
+];
+
+export const PLAYERS_LEADERBOARD = INITIAL_PLAYERS;
 
 export const WOMEN_TEAMS = [
   { id: 'women-queens', name: 'Arusha Queens', city: 'Arusha Central', record: '14-1', titles: 3, coach: 'Neema Mollel' },

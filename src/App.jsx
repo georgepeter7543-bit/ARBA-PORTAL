@@ -11,6 +11,7 @@ import AcademiesView from './components/AcademiesView';
 import AdminPortal from './components/AdminPortal';
 import LoginModal from './components/LoginModal';
 import Footer from './components/Footer';
+import { INITIAL_PLAYERS, TEAMS } from './data/basketballData';
 
 export default function App() {
   const [activeNav, setActiveNav] = useState('Home');
@@ -20,32 +21,89 @@ export default function App() {
   // Admin Authentication State
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(() => {
     try {
-      return localStorage.getItem('arba_is_admin') === 'true';
+      return (
+        localStorage.getItem('arba_is_admin_authenticated') === 'true' ||
+        localStorage.getItem('arba_is_admin') === 'true'
+      );
     } catch {
       return false;
     }
   });
 
-  // Direct Access Block: Automatically redirect to Home and launch Login modal if unauthenticated attempts to access Dashboard
+  // Direct Access Block: Automatically redirect to Home if unauthenticated attempts to access Dashboard
   useEffect(() => {
+    const verifyAuth = () => {
+      const isAuth =
+        localStorage.getItem('arba_is_admin_authenticated') === 'true' ||
+        localStorage.getItem('arba_is_admin') === 'true';
+
+      setIsAdminAuthenticated(isAuth);
+
+      if (activeNav === 'Dashboard' && !isAuth) {
+        window.location.replace('/');
+      }
+    };
+
+    window.addEventListener('popstate', verifyAuth);
+    window.addEventListener('storage', verifyAuth);
+    window.addEventListener('arba_sign_out', verifyAuth);
+
     if (activeNav === 'Dashboard' && !isAdminAuthenticated) {
-      const timer = setTimeout(() => {
-        setActiveNav('Home');
-        setLoginModalOpen(true);
-      }, 0);
-      return () => clearTimeout(timer);
+      window.location.replace('/');
     }
+
+    return () => {
+      window.removeEventListener('popstate', verifyAuth);
+      window.removeEventListener('storage', verifyAuth);
+      window.removeEventListener('arba_sign_out', verifyAuth);
+    };
   }, [activeNav, isAdminAuthenticated]);
 
   // Custom Registered Players State
   const [customPlayers, setCustomPlayers] = useState(() => {
     try {
-      const saved = localStorage.getItem('arba_custom_players');
-      return saved ? JSON.parse(saved) : [];
+      const saved = localStorage.getItem('arba_players') || localStorage.getItem('arba_custom_players');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
+      }
     } catch {
-      return [];
+      // fallback
     }
+    // Seed with INITIAL_PLAYERS if empty, and write to localStorage under arba_players
+    try {
+      localStorage.setItem('arba_players', JSON.stringify(INITIAL_PLAYERS));
+      localStorage.setItem('arba_custom_players', JSON.stringify(INITIAL_PLAYERS));
+    } catch {
+      // ignore
+    }
+    return INITIAL_PLAYERS;
   });
+
+  // Real-time synchronization listener for players across components / tabs
+  useEffect(() => {
+    const handleSyncPlayers = () => {
+      try {
+        const saved = localStorage.getItem('arba_players') || localStorage.getItem('arba_custom_players');
+        if (saved) {
+          setCustomPlayers(JSON.parse(saved));
+        }
+      } catch (err) {
+        console.error('Error syncing players in App:', err);
+      }
+    };
+
+    window.addEventListener('storage', handleSyncPlayers);
+    window.addEventListener('arba_players_updated', handleSyncPlayers);
+    window.addEventListener('arba_player_updated', handleSyncPlayers);
+    return () => {
+      window.removeEventListener('storage', handleSyncPlayers);
+      window.removeEventListener('arba_players_updated', handleSyncPlayers);
+      window.removeEventListener('arba_player_updated', handleSyncPlayers);
+    };
+  }, []);
 
   // News Articles State
   const [newsArticles, setNewsArticles] = useState(() => {
@@ -83,15 +141,30 @@ export default function App() {
     ];
   });
 
-  // Persist custom players changes to localStorage
+  // Persist custom players changes to localStorage (under arba_players and arba_custom_players)
   const handleAddPlayer = (newPlayer) => {
     const updated = [newPlayer, ...customPlayers];
     setCustomPlayers(updated);
     try {
+      localStorage.setItem('arba_players', JSON.stringify(updated));
       localStorage.setItem('arba_custom_players', JSON.stringify(updated));
+      window.dispatchEvent(new Event('arba_players_updated'));
       window.dispatchEvent(new Event('arba_player_updated'));
     } catch (err) {
       console.error('Failed to save player to localStorage', err);
+    }
+  };
+
+  const handleUpdatePlayer = (updatedPlayer) => {
+    const updated = customPlayers.map((p) => (p.id === updatedPlayer.id ? updatedPlayer : p));
+    setCustomPlayers(updated);
+    try {
+      localStorage.setItem('arba_players', JSON.stringify(updated));
+      localStorage.setItem('arba_custom_players', JSON.stringify(updated));
+      window.dispatchEvent(new Event('arba_players_updated'));
+      window.dispatchEvent(new Event('arba_player_updated'));
+    } catch (err) {
+      console.error('Failed to update player in localStorage', err);
     }
   };
 
@@ -99,7 +172,9 @@ export default function App() {
     const updated = customPlayers.filter((p) => p.id !== playerId);
     setCustomPlayers(updated);
     try {
+      localStorage.setItem('arba_players', JSON.stringify(updated));
       localStorage.setItem('arba_custom_players', JSON.stringify(updated));
+      window.dispatchEvent(new Event('arba_players_updated'));
       window.dispatchEvent(new Event('arba_player_updated'));
     } catch (err) {
       console.error('Failed to delete player from localStorage', err);
@@ -228,6 +303,136 @@ export default function App() {
     }
   };
 
+  // Teams & Rosters State (persisted in localStorage under 'arba_teams')
+  const [teams, setTeams] = useState(() => {
+    try {
+      const saved = localStorage.getItem('arba_teams');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
+      }
+    } catch {
+      // fallback
+    }
+    const initial = TEAMS.map(t => ({
+      ...t,
+      headCoach: t.headCoach || t.coach || '',
+      coach: t.coach || t.headCoach || '',
+      arena: t.arena || t.homeCourt || '',
+      homeCourt: t.homeCourt || t.arena || '',
+      record: t.record || '0-0',
+      division: t.division || "Men's Premier Division",
+      roster: Array.isArray(t.roster) ? t.roster : []
+    }));
+    try {
+      localStorage.setItem('arba_teams', JSON.stringify(initial));
+    } catch {
+      // ignore
+    }
+    return initial;
+  });
+
+  // Sync teams across components / tabs via event listener
+  useEffect(() => {
+    const handleSyncTeams = () => {
+      try {
+        const saved = localStorage.getItem('arba_teams');
+        if (saved) {
+          setTeams(JSON.parse(saved));
+        }
+      } catch (err) {
+        console.error('Error syncing teams in App:', err);
+      }
+    };
+    window.addEventListener('storage', handleSyncTeams);
+    window.addEventListener('arba_teams_updated', handleSyncTeams);
+    return () => {
+      window.removeEventListener('storage', handleSyncTeams);
+      window.removeEventListener('arba_teams_updated', handleSyncTeams);
+    };
+  }, []);
+
+  // Update Team Profile Details
+  const handleUpdateTeam = (updatedTeam) => {
+    const updated = teams.map((t) => (t.id === updatedTeam.id ? updatedTeam : t));
+    setTeams(updated);
+    try {
+      localStorage.setItem('arba_teams', JSON.stringify(updated));
+      window.dispatchEvent(new Event('arba_teams_updated'));
+    } catch (err) {
+      console.error('Failed to update team in localStorage', err);
+    }
+  };
+
+  // Assign Player to Team Roster
+  const handleAssignPlayerToTeam = (teamId, playerId) => {
+    const team = teams.find(t => t.id === teamId);
+    const player = customPlayers.find(p => p.id === playerId);
+    if (!team || !player) return;
+
+    // 1. Update player's team affiliation
+    const updatedPlayer = { ...player, team: team.name };
+    const updatedPlayers = customPlayers.map(p => p.id === playerId ? updatedPlayer : p);
+    setCustomPlayers(updatedPlayers);
+
+    // 2. Update team's active roster
+    const currentRoster = Array.isArray(team.roster) ? team.roster : [];
+    const playerAlreadyInRoster = currentRoster.some(p => (p.id || p) === playerId);
+    const newRoster = playerAlreadyInRoster 
+      ? currentRoster.map(p => (p.id || p) === playerId ? updatedPlayer : p)
+      : [...currentRoster, updatedPlayer];
+
+    const updatedTeam = { ...team, roster: newRoster };
+    const updatedTeams = teams.map(t => t.id === teamId ? updatedTeam : t);
+    setTeams(updatedTeams);
+
+    // Persist both to localStorage
+    try {
+      localStorage.setItem('arba_players', JSON.stringify(updatedPlayers));
+      localStorage.setItem('arba_custom_players', JSON.stringify(updatedPlayers));
+      localStorage.setItem('arba_teams', JSON.stringify(updatedTeams));
+      window.dispatchEvent(new Event('arba_players_updated'));
+      window.dispatchEvent(new Event('arba_teams_updated'));
+    } catch (err) {
+      console.error('Failed to assign player to team in localStorage', err);
+    }
+  };
+
+  // Remove Player from Team Roster
+  const handleRemovePlayerFromTeam = (teamId, playerId) => {
+    const team = teams.find(t => t.id === teamId);
+    if (!team) return;
+
+    // 1. Remove from team roster
+    const currentRoster = Array.isArray(team.roster) ? team.roster : [];
+    const newRoster = currentRoster.filter(p => (p.id || p) !== playerId);
+    const updatedTeam = { ...team, roster: newRoster };
+    const updatedTeams = teams.map(t => t.id === teamId ? updatedTeam : t);
+    setTeams(updatedTeams);
+
+    // 2. Set player's team to 'Unassigned' if they belonged to this team
+    const updatedPlayers = customPlayers.map(p => {
+      if (p.id === playerId && (p.team === team.name || p.team === team.shortName)) {
+        return { ...p, team: 'Unassigned' };
+      }
+      return p;
+    });
+    setCustomPlayers(updatedPlayers);
+
+    // Persist both to localStorage
+    try {
+      localStorage.setItem('arba_players', JSON.stringify(updatedPlayers));
+      localStorage.setItem('arba_custom_players', JSON.stringify(updatedPlayers));
+      localStorage.setItem('arba_teams', JSON.stringify(updatedTeams));
+      window.dispatchEvent(new Event('arba_players_updated'));
+      window.dispatchEvent(new Event('arba_teams_updated'));
+    } catch (err) {
+      console.error('Failed to remove player from team in localStorage', err);
+    }
+  };
+
   // Handle Admin Login Success:
   // • Set isAdminAuthenticated to true
   // • Dynamically reveals Dashboard in navbar
@@ -236,6 +441,7 @@ export default function App() {
   const handleAdminSuccess = () => {
     setIsAdminAuthenticated(true);
     try {
+      localStorage.setItem('arba_is_admin_authenticated', 'true');
       localStorage.setItem('arba_is_admin', 'true');
     } catch (err) {
       console.error('Failed to save admin state to localStorage', err);
@@ -245,17 +451,18 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  // Handle Sign Out as Admin
+  // Handle Sign Out as Admin (overwrites history with window.location.replace to block Back button re-entry)
   const handleSignOut = () => {
     setIsAdminAuthenticated(false);
     try {
+      localStorage.removeItem('arba_is_admin_authenticated');
       localStorage.removeItem('arba_is_admin');
+      sessionStorage.clear();
+      window.dispatchEvent(new Event('arba_sign_out'));
     } catch (err) {
-      console.error('Failed to remove admin state from localStorage', err);
+      console.error('Failed to clear admin state from storage', err);
     }
-    if (activeNav === 'Dashboard' || activeNav === 'Admin') {
-      setActiveNav('Home');
-    }
+    window.location.replace('/');
   };
 
   // Handle nav tab switching with security block for Dashboard
@@ -276,6 +483,7 @@ export default function App() {
   // Open team roster modal
   const handleOpenTeamModal = (team) => {
     setSelectedTeamModal(team);
+    setActiveNav('Teams');
   };
 
   return (
@@ -294,6 +502,7 @@ export default function App() {
       <main className="flex-1">
         {activeNav === 'Home' && (
           <HomeView
+            teams={teams}
             onSelectNav={handleNavSelect}
             onSelectTeam={handleOpenTeamModal}
             newsArticles={newsArticles}
@@ -302,6 +511,7 @@ export default function App() {
 
         {activeNav === 'Teams' && (
           <TeamsView
+            teams={teams}
             selectedTeamModal={selectedTeamModal}
             onCloseTeamModal={() => setSelectedTeamModal(null)}
             onOpenTeamModal={handleOpenTeamModal}
@@ -337,7 +547,12 @@ export default function App() {
             <AdminPortal
               customPlayers={customPlayers}
               onAddPlayer={handleAddPlayer}
+              onUpdatePlayer={handleUpdatePlayer}
               onDeletePlayer={handleDeletePlayer}
+              teams={teams}
+              onUpdateTeam={handleUpdateTeam}
+              onAssignPlayerToTeam={handleAssignPlayerToTeam}
+              onRemovePlayerFromTeam={handleRemovePlayerFromTeam}
               newsArticles={newsArticles}
               onAddNews={handleAddNews}
               onUpdateNews={handleUpdateNews}
@@ -350,6 +565,7 @@ export default function App() {
               onAddOfficial={handleAddOfficial}
               onUpdateOfficial={handleUpdateOfficial}
               onDeleteOfficial={handleDeleteOfficial}
+              onSignOut={handleSignOut}
               onExitAdmin={() => {
                 setActiveNav('Home');
                 window.scrollTo({ top: 0, behavior: 'smooth' });

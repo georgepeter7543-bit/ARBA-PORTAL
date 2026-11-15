@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import TeamCrest from './TeamCrest';
+import PlayerAvatar from './PlayerAvatar';
 import { TEAMS } from '../data/basketballData';
 import { 
   Search, 
@@ -9,9 +10,72 @@ import {
   Shield
 } from 'lucide-react';
 
-export default function TeamsView({ selectedTeamModal, onCloseTeamModal, onOpenTeamModal }) {
+export default function TeamsView({ selectedTeamModal, onCloseTeamModal, onOpenTeamModal, teams: propTeams = [] }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterDivision, setFilterDivision] = useState('All');
+
+  // Real-time local teams state synced with localStorage
+  const [localTeams, setLocalTeams] = useState(() => {
+    try {
+      const saved = localStorage.getItem('arba_teams');
+      if (saved) return JSON.parse(saved);
+    } catch {
+      // fallback
+    }
+    return TEAMS;
+  });
+
+  // Real-time players state synced with localStorage
+  const [localPlayers, setLocalPlayers] = useState(() => {
+    try {
+      const saved = localStorage.getItem('arba_players') || localStorage.getItem('arba_custom_players');
+      if (saved) return JSON.parse(saved);
+    } catch {
+      return [];
+    }
+  });
+
+  // Listen for storage events and custom sync events
+  useEffect(() => {
+    const handleSync = () => {
+      try {
+        const savedTeams = localStorage.getItem('arba_teams');
+        if (savedTeams) {
+          setLocalTeams(JSON.parse(savedTeams));
+        }
+        const savedPlayers = localStorage.getItem('arba_players') || localStorage.getItem('arba_custom_players');
+        if (savedPlayers) {
+          setLocalPlayers(JSON.parse(savedPlayers));
+        }
+      } catch (err) {
+        console.error('Error syncing data in TeamsView:', err);
+      }
+    };
+
+    window.addEventListener('storage', handleSync);
+    window.addEventListener('arba_teams_updated', handleSync);
+    window.addEventListener('arba_players_updated', handleSync);
+    window.addEventListener('arba_player_updated', handleSync);
+    return () => {
+      window.removeEventListener('storage', handleSync);
+      window.removeEventListener('arba_teams_updated', handleSync);
+      window.removeEventListener('arba_players_updated', handleSync);
+      window.removeEventListener('arba_player_updated', handleSync);
+    };
+  }, []);
+
+  // Active teams list prioritizing props or synced localStorage
+  const activeTeamsList = useMemo(() => {
+    if (propTeams && propTeams.length > 0) return propTeams;
+    if (localTeams && localTeams.length > 0) return localTeams;
+    return TEAMS;
+  }, [propTeams, localTeams]);
+
+  // Dynamically resolve currently active team for the modal
+  const activeTeam = useMemo(() => {
+    if (!selectedTeamModal) return null;
+    return activeTeamsList.find((t) => t.id === selectedTeamModal.id || t.name === selectedTeamModal.name) || selectedTeamModal;
+  }, [selectedTeamModal, activeTeamsList]);
 
   // Close modal on ESC key
   useEffect(() => {
@@ -24,59 +88,79 @@ export default function TeamsView({ selectedTeamModal, onCloseTeamModal, onOpenT
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectedTeamModal, onCloseTeamModal]);
 
-  const filteredTeams = TEAMS.filter((team) => {
+  const filteredTeams = activeTeamsList.filter((team) => {
     const matchesSearch = 
       team.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      team.city.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      team.homeCourt.toLowerCase().includes(searchTerm.toLowerCase());
+      (team.city && team.city.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      ((team.homeCourt || team.arena || '').toLowerCase().includes(searchTerm.toLowerCase()));
     
     if (filterDivision === 'All') return matchesSearch;
     return matchesSearch && team.division === filterDivision;
   });
 
-  // Filter automatically from registered players dataset matching this team
+  // Filter automatically from team roster array and registered players dataset matching this team
   const modalRoster = useMemo(() => {
-    if (!selectedTeamModal) return [];
-
-    const teamNameLower = selectedTeamModal.name.toLowerCase();
-    const shortNameLower = selectedTeamModal.shortName ? selectedTeamModal.shortName.toLowerCase() : '';
+    if (!activeTeam) return [];
 
     const rosterMap = new Map();
 
-    // Check registered players from localStorage
-    try {
-      const saved = localStorage.getItem('arba_custom_players');
-      if (saved) {
-        const custom = JSON.parse(saved);
-        if (Array.isArray(custom)) {
-          custom.forEach((cp) => {
-            const cpTeam = (cp.team || '').toLowerCase();
-            if (
-              cpTeam === teamNameLower || 
-              cpTeam === shortNameLower || 
-              (shortNameLower && cpTeam.includes(shortNameLower))
-            ) {
-              rosterMap.set(cp.name.toLowerCase(), {
-                id: cp.id,
-                num: cp.jersey !== undefined && cp.jersey !== '' ? cp.jersey : 0,
-                name: cp.name,
-                image: cp.image || null,
-                pos: cp.pos || 'G',
-                age: cp.age || 24,
-                height: cp.height || '196 cm / 6\'5"',
-                ppg: cp.ppg || 0,
-                isCustom: true
-              });
-            }
+    // 1. First add athletes from activeTeam.roster array if present
+    if (Array.isArray(activeTeam.roster)) {
+      activeTeam.roster.forEach((p) => {
+        if (!p) return;
+        const key = p.id || (p.name && p.name.toLowerCase());
+        if (key) {
+          rosterMap.set(key, {
+            id: p.id || key,
+            num: p.jersey !== undefined && p.jersey !== '' ? p.jersey : (p.num || '00'),
+            name: p.name,
+            photoUrl: p.photoUrl || p.avatar || p.image || '',
+            image: p.image || p.photoUrl || p.avatar || null,
+            pos: p.pos || p.position || 'G',
+            age: p.age || 24,
+            height: p.height || '196 cm / 6\'5"',
+            ppg: p.ppg || 0,
+            isCustom: p.isCustom ?? true
           });
         }
-      }
-    } catch (err) {
-      console.error('Error reading custom players for modal:', err);
+      });
+    }
+
+    // 2. Also check registered players from localStorage (localPlayers) where player.team matches
+    if (Array.isArray(localPlayers)) {
+      const teamNameLower = (activeTeam.name || '').toLowerCase();
+      const shortNameLower = (activeTeam.shortName || '').toLowerCase();
+
+      localPlayers.forEach((cp) => {
+        const cpTeam = (cp.team || '').toLowerCase();
+        const matchesTeam = 
+          cpTeam === teamNameLower || 
+          (shortNameLower && cpTeam === shortNameLower) ||
+          (shortNameLower && cpTeam.includes(shortNameLower));
+
+        const inTeamRoster = Array.isArray(activeTeam.roster) && 
+          activeTeam.roster.some(r => (typeof r === 'string' ? r === cp.id : r.id === cp.id));
+
+        if (matchesTeam || inTeamRoster) {
+          const key = cp.id || cp.name.toLowerCase();
+          rosterMap.set(key, {
+            id: cp.id,
+            num: cp.jersey !== undefined && cp.jersey !== '' ? cp.jersey : 0,
+            name: cp.name,
+            photoUrl: cp.photoUrl || cp.avatar || cp.image || '',
+            image: cp.image || cp.photoUrl || cp.avatar || null,
+            pos: cp.pos || cp.position || 'G',
+            age: cp.age || 24,
+            height: cp.height || '196 cm / 6\'5"',
+            ppg: cp.ppg || 0,
+            isCustom: true
+          });
+        }
+      });
     }
 
     return Array.from(rosterMap.values());
-  }, [selectedTeamModal]);
+  }, [activeTeam, localPlayers]);
 
   return (
     <div className="min-h-screen bg-[#F9FAFB] text-[#111827] pb-16 animate-fadeIn select-none">
@@ -166,7 +250,7 @@ export default function TeamsView({ selectedTeamModal, onCloseTeamModal, onOpenT
                   {/* ENLARGED TEAM LOGO */}
                   <div className="w-24 h-24 sm:w-28 sm:h-28 bg-[#FFFFFF] rounded-2xl p-2.5 flex items-center justify-center border border-[#E5E7EB] shadow-xs shrink-0">
                     <TeamCrest 
-                      team={selectedTeamModal} 
+                      team={activeTeam} 
                       className="w-full h-full object-contain drop-shadow-xs" 
                     />
                   </div>
@@ -174,25 +258,25 @@ export default function TeamsView({ selectedTeamModal, onCloseTeamModal, onOpenT
                   <div className="space-y-1.5">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-orange-50 text-[#F97316] border border-orange-200">
-                        {selectedTeamModal.division || "Men's Premier Division"}
+                        {activeTeam.division || "Men's Premier Division"}
                       </span>
                       <span className="font-mono text-xs font-black text-gray-700 bg-gray-100 px-2 py-0.5 rounded border border-gray-200">
-                        Rec: {selectedTeamModal.record}
+                        Rec: {activeTeam.record || '0-0'}
                       </span>
                     </div>
 
                     <h2 className="text-2xl sm:text-3xl font-black text-[#111827] uppercase tracking-tight font-sans leading-tight">
-                      {selectedTeamModal.name}
+                      {activeTeam.name}
                     </h2>
 
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-600 font-medium">
                       <span className="flex items-center space-x-1.5">
                         <User className="w-3.5 h-3.5 text-gray-400" />
-                        <span>Head Coach: <strong className="text-[#111827] font-semibold">{selectedTeamModal.coach}</strong></span>
+                        <span>Head Coach: <strong className="text-[#111827] font-semibold">{activeTeam.headCoach || activeTeam.coach || 'To Be Announced'}</strong></span>
                       </span>
                       <span className="flex items-center space-x-1.5">
                         <MapPin className="w-3.5 h-3.5 text-[#F97316]" />
-                        <span>Arena: <strong className="text-[#111827] font-semibold">{selectedTeamModal.homeCourt}</strong></span>
+                        <span>Arena: <strong className="text-[#111827] font-semibold">{activeTeam.arena || activeTeam.homeCourt || 'Sheikh Amri Abeid Stadium'}</strong></span>
                       </span>
                     </div>
                   </div>
@@ -214,7 +298,7 @@ export default function TeamsView({ selectedTeamModal, onCloseTeamModal, onOpenT
                 <div className="flex items-center justify-between">
                   <h3 className="text-xs font-black uppercase tracking-wider text-[#111827] flex items-center space-x-2">
                     <Shield className="w-4 h-4 text-[#F97316]" />
-                    <span>Official Active Roster ({selectedTeamModal.name})</span>
+                    <span>Official Active Roster ({activeTeam.name})</span>
                   </h3>
                   <span className="text-xs font-mono font-bold text-gray-500">
                     {modalRoster.length} Registered Athletes
@@ -248,13 +332,11 @@ export default function TeamsView({ selectedTeamModal, onCloseTeamModal, onOpenT
                           {/* 2. PLAYER NAME (AVATAR + NAME) */}
                           <td className="py-3.5 px-4">
                             <div className="flex items-center space-x-3">
-                              <div className="w-8 h-8 rounded-full bg-[#F3F4F6] border border-[#E5E7EB] overflow-hidden flex items-center justify-center text-[#F97316] font-bold text-xs shrink-0">
-                                {player.image ? (
-                                  <img src={player.image} alt={player.name} className="w-full h-full object-cover" />
-                                ) : (
-                                  <User className="w-4 h-4 text-gray-400" />
-                                )}
-                              </div>
+                              <PlayerAvatar
+                                photoUrl={player.photoUrl || player.avatar || player.image}
+                                name={player.name}
+                                size="w-9 h-9"
+                              />
                               <div className="flex items-center space-x-2">
                                 <span className="font-bold text-[#111827] text-xs sm:text-sm">
                                   {player.name}

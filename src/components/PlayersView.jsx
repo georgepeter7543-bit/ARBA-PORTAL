@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Search, User, ShieldCheck, ArrowUpDown } from 'lucide-react';
+import PlayerAvatar from './PlayerAvatar';
 
 export default function PlayersView({ customPlayers = [] }) {
   const [search, setSearch] = useState('');
@@ -10,7 +11,7 @@ export default function PlayersView({ customPlayers = [] }) {
   // Local storage real-time listener for instant dynamic sync
   const [localPlayers, setLocalPlayers] = useState(() => {
     try {
-      const saved = localStorage.getItem('arba_custom_players');
+      const saved = localStorage.getItem('arba_players') || localStorage.getItem('arba_custom_players');
       return saved ? JSON.parse(saved) : [];
     } catch {
       return [];
@@ -20,7 +21,7 @@ export default function PlayersView({ customPlayers = [] }) {
   useEffect(() => {
     const handleSync = () => {
       try {
-        const saved = localStorage.getItem('arba_custom_players');
+        const saved = localStorage.getItem('arba_players') || localStorage.getItem('arba_custom_players');
         if (saved) {
           setLocalPlayers(JSON.parse(saved));
         }
@@ -30,9 +31,11 @@ export default function PlayersView({ customPlayers = [] }) {
     };
 
     window.addEventListener('storage', handleSync);
+    window.addEventListener('arba_players_updated', handleSync);
     window.addEventListener('arba_player_updated', handleSync);
     return () => {
       window.removeEventListener('storage', handleSync);
+      window.removeEventListener('arba_players_updated', handleSync);
       window.removeEventListener('arba_player_updated', handleSync);
     };
   }, []);
@@ -42,7 +45,7 @@ export default function PlayersView({ customPlayers = [] }) {
     if (Array.isArray(customPlayers) && customPlayers.length > 0) return customPlayers;
     if (Array.isArray(localPlayers) && localPlayers.length > 0) return localPlayers;
     try {
-      const saved = localStorage.getItem('arba_custom_players');
+      const saved = localStorage.getItem('arba_players') || localStorage.getItem('arba_custom_players');
       return saved ? JSON.parse(saved) : [];
     } catch {
       return [];
@@ -53,8 +56,13 @@ export default function PlayersView({ customPlayers = [] }) {
   const allPlayers = useMemo(() => {
     return (storedPlayers || []).map((p) => ({
       ...p,
+      photoUrl: p.photoUrl || p.avatar || p.image || '',
+      avatar: p.avatar || p.photoUrl || p.image || '',
+      image: p.image || p.photoUrl || p.avatar || '',
       isCustom: true,
       jersey: p.jersey !== undefined && p.jersey !== '' ? p.jersey : 0,
+      pos: p.pos || p.position || 'G',
+      position: p.position || p.pos || 'G',
       age: p.age || 24,
       height: p.height || '196 cm / 6\'5"',
       status: p.status || 'Active'
@@ -176,6 +184,9 @@ export default function PlayersView({ customPlayers = [] }) {
                     <ArrowUpDown className="w-3 h-3 opacity-60" />
                   </div>
                 </th>
+                <th className="py-3.5 px-3 w-16 text-center select-none text-[#374151]">
+                  <span>Photo</span>
+                </th>
                 <th 
                   onClick={() => handleSort('name')} 
                   className="py-3.5 px-4 cursor-pointer hover:text-[#F97316] select-none transition"
@@ -239,54 +250,54 @@ export default function PlayersView({ customPlayers = [] }) {
                     #{player.jersey || '00'}
                   </td>
 
-                  {/* 2. PLAYER NAME & AVATAR */}
-                  <td className="py-3.5 px-4">
-                    <div className="flex items-center space-x-3">
-                      <div className="w-9 h-9 rounded-full bg-[#F3F4F6] border border-[#E5E7EB] overflow-hidden flex items-center justify-center text-[#F97316] font-bold text-xs shrink-0 group-hover:border-[#F97316] transition">
-                        {player.image ? (
-                          <img src={player.image} alt={player.name} className="w-full h-full object-cover" />
-                        ) : (
-                          <User className="w-4 h-4 text-[#9CA3AF]" />
-                        )}
-                      </div>
-                      <div className="min-w-0">
-                        <div className="flex items-center space-x-2">
-                          <span className="font-bold text-[#111827] text-xs sm:text-sm group-hover:text-[#F97316] transition truncate">
-                            {player.name}
-                          </span>
-                          {player.isCustom && (
-                            <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-orange-100 text-[#F97316] border border-orange-300 shrink-0">
-                              NEW
-                            </span>
-                          )}
-                        </div>
-                      </div>
+                  {/* 2. DEDICATED PHOTO / AVATAR COLUMN */}
+                  <td className="py-3.5 px-3 text-center">
+                    <div className="flex items-center justify-center">
+                      <PlayerAvatar
+                        photoUrl={player.photoUrl || player.avatar || player.image}
+                        name={player.name}
+                        size="w-10 h-10"
+                      />
                     </div>
                   </td>
 
-                  {/* 3. CURRENT TEAM */}
+                  {/* 3. PLAYER NAME */}
+                  <td className="py-3.5 px-4">
+                    <div className="flex items-center space-x-2">
+                      <span className="font-bold text-[#111827] text-xs sm:text-sm group-hover:text-[#F97316] transition truncate">
+                        {player.name}
+                      </span>
+                      {player.isCustom && (
+                        <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-orange-100 text-[#F97316] border border-orange-300 shrink-0">
+                          NEW
+                        </span>
+                      )}
+                    </div>
+                  </td>
+
+                  {/* 4. CURRENT TEAM */}
                   <td className="py-3.5 px-4 font-semibold text-[#1F2937] text-xs sm:text-sm">
                     {player.team}
                   </td>
 
-                  {/* 4. POS */}
+                  {/* 5. POS */}
                   <td className="py-3.5 px-3 text-center">
                     <span className="inline-block px-2.5 py-0.5 rounded text-[11px] font-black font-mono tracking-wider bg-orange-50 text-[#F97316] border border-orange-200">
-                      {player.pos || 'G'}
+                      {player.pos || player.position || 'G'}
                     </span>
                   </td>
 
-                  {/* 5. AGE */}
+                  {/* 6. AGE */}
                   <td className="py-3.5 px-3 text-center font-mono text-[#374151] text-xs font-medium">
                     {player.age ? `${player.age} yrs` : '24 yrs'}
                   </td>
 
-                  {/* 6. HEIGHT */}
+                  {/* 7. HEIGHT */}
                   <td className="py-3.5 px-4 text-center font-mono text-[#374151] text-xs font-medium whitespace-nowrap">
                     {player.height || '196 cm / 6\'5"'}
                   </td>
 
-                  {/* 7. PPG */}
+                  {/* 8. PPG */}
                   <td className="py-3.5 px-5 text-right font-mono font-black text-[#F97316] text-sm sm:text-base">
                     {Number(player.ppg || 0).toFixed(1)}
                   </td>
@@ -295,7 +306,7 @@ export default function PlayersView({ customPlayers = [] }) {
 
               {filteredPlayers.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="py-16 px-4 text-center bg-[#FFFFFF]">
+                  <td colSpan={8} className="py-16 px-4 text-center bg-[#FFFFFF]">
                     <div className="flex flex-col items-center justify-center max-w-md mx-auto space-y-3">
                       <div className="w-12 h-12 rounded-full bg-orange-500/10 border border-orange-500/20 flex items-center justify-center text-[#F97316]">
                         <User className="w-6 h-6" />

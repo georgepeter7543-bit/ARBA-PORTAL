@@ -1,29 +1,80 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useMemo, useEffect } from 'react';
 import { 
   UserPlus, 
   Newspaper, 
   Trash2, 
-  Pencil,
+  Pencil, 
   ShieldCheck, 
   ArrowLeft, 
   CheckCircle2, 
-  AlertCircle,
-  Calendar,
-  Hash,
-  Upload,
-  Link as LinkIcon,
-  X,
-  Sparkles,
-  Award,
-  Shield,
-  Image as ImageIcon,
-  Lock,
-  KeyRound,
-  Eye,
-  EyeOff,
-  RotateCcw
+  AlertCircle, 
+  Calendar, 
+  Hash, 
+  Upload, 
+  Link as LinkIcon, 
+  X, 
+  Sparkles, 
+  Award, 
+  Shield, 
+  Image as ImageIcon, 
+  Lock, 
+  KeyRound, 
+  Eye, 
+  EyeOff, 
+  RotateCcw, 
+  Trophy, 
+  Users, 
+  UserMinus, 
+  Plus, 
+  Camera, 
+  User,
+  LogOut
 } from 'lucide-react';
 import { TEAMS } from '../data/basketballData';
+import PlayerAvatar from './PlayerAvatar';
+import TeamCrest from './TeamCrest';
+
+/**
+ * Client-side canvas compression utility to convert image files into lightweight
+ * Base64 JPEG strings (max 300x300px, ~20-35KB), avoiding localStorage quota limits.
+ */
+const compressImageFile = (file, maxWidth = 300, maxHeight = 300, quality = 0.85) => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > maxWidth) {
+            height = Math.round((height * maxWidth) / width);
+            width = maxWidth;
+          }
+        } else {
+          if (height > maxHeight) {
+            width = Math.round((width * maxHeight) / height);
+            height = maxHeight;
+          }
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+
+        const dataUrl = canvas.toDataURL('image/jpeg', quality);
+        resolve(dataUrl);
+      };
+      img.onerror = () => reject(new Error('Failed to load image for compression.'));
+      img.src = e.target.result;
+    };
+    reader.onerror = () => reject(new Error('Failed to read file.'));
+    reader.readAsDataURL(file);
+  });
+};
 
 const PRESET_NEWS_IMAGES = [
   { label: 'Action Play', url: 'https://images.unsplash.com/photo-1546519638-68e109498ffc?auto=format&fit=crop&w=1600&q=80' },
@@ -36,7 +87,12 @@ const PRESET_NEWS_IMAGES = [
 export default function AdminPortal({
   customPlayers,
   onAddPlayer,
+  _onUpdatePlayer,
   onDeletePlayer,
+  teams = [],
+  onUpdateTeam,
+  onAssignPlayerToTeam,
+  onRemovePlayerFromTeam,
   newsArticles,
   onAddNews,
   onUpdateNews,
@@ -49,8 +105,39 @@ export default function AdminPortal({
   onAddOfficial,
   onUpdateOfficial,
   onDeleteOfficial,
-  onExitAdmin
+  onExitAdmin,
+  onSignOut
 }) {
+  // Security Guard: Check authentication on mount and on popstate (browser Back/Forward navigation)
+  const [isLocked, setIsLocked] = useState(false);
+
+  useEffect(() => {
+    const checkAuthStatus = () => {
+      const isAuth =
+        localStorage.getItem('arba_is_admin_authenticated') === 'true' ||
+        localStorage.getItem('arba_is_admin') === 'true';
+
+      if (!isAuth) {
+        setIsLocked(true);
+        window.location.replace('/');
+      }
+    };
+
+    // Immediate check on mount
+    checkAuthStatus();
+
+    // Intercept browser back/forward navigation and sign-out events
+    window.addEventListener('popstate', checkAuthStatus);
+    window.addEventListener('storage', checkAuthStatus);
+    window.addEventListener('arba_sign_out', checkAuthStatus);
+
+    return () => {
+      window.removeEventListener('popstate', checkAuthStatus);
+      window.removeEventListener('storage', checkAuthStatus);
+      window.removeEventListener('arba_sign_out', checkAuthStatus);
+    };
+  }, []);
+
   const [activeTab, setActiveTab] = useState('players'); // 'players' | 'news' | 'coaches' | 'officials'
 
   // Player Form State
@@ -79,6 +166,7 @@ export default function AdminPortal({
   const [newsErrorMsg, setNewsErrorMsg] = useState('');
 
   const fileInputRef = useRef(null);
+  const playerPhotoFileRef = useRef(null);
   const newsFormRef = useRef(null);
 
   // Coach Form State
@@ -136,8 +224,11 @@ export default function AdminPortal({
     const newPlayer = {
       id: 'player-' + Date.now(),
       name: playerName.trim(),
+      photoUrl: playerPhotoUrl.trim() || '',
+      avatar: playerPhotoUrl.trim() || '',
       image: playerPhotoUrl.trim() || null,
       team: playerTeam,
+      position: playerPosition,
       pos: playerPosition,
       jersey: jerseyNum,
       age: ageNum,
@@ -154,6 +245,9 @@ export default function AdminPortal({
     // Reset Form
     setPlayerName('');
     setPlayerPhotoUrl('');
+    if (playerPhotoFileRef.current) {
+      playerPhotoFileRef.current.value = '';
+    }
     setPlayerJersey('');
     setPlayerAge('');
     setPlayerHeight('');
@@ -186,6 +280,32 @@ export default function AdminPortal({
       setNewsErrorMsg('Failed to process image file.');
     };
     reader.readAsDataURL(file);
+  };
+
+  // Player Photo File Upload Handler (auto-compresses to 300x300 Base64 Data URL)
+  const handlePlayerPhotoFileUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      setPlayerErrorMsg('Please select a valid image file (JPG, PNG, WebP).');
+      return;
+    }
+
+    // Client-side file size check (5MB raw limit, compressed to ~25KB)
+    if (file.size > 5 * 1024 * 1024) {
+      setPlayerErrorMsg('Player photo file size exceeds 5MB. Please choose a smaller image.');
+      return;
+    }
+
+    try {
+      const compressedBase64 = await compressImageFile(file, 300, 300, 0.85);
+      setPlayerPhotoUrl(compressedBase64);
+      setPlayerErrorMsg('');
+    } catch (err) {
+      console.error('Error compressing player image:', err);
+      setPlayerErrorMsg('Failed to process and compress player photo file.');
+    }
   };
 
   // Start Editing News
@@ -494,6 +614,146 @@ export default function AdminPortal({
     }
   };
 
+  // Teams & Rosters Management State
+  const teamsList = useMemo(() => {
+    return Array.isArray(teams) && teams.length > 0 ? teams : TEAMS;
+  }, [teams]);
+
+  const [selectedTeamId, setSelectedTeamId] = useState(() => {
+    return teamsList[0]?.id || 'arusha-kings';
+  });
+
+  const currentSelectedTeam = useMemo(() => {
+    return teamsList.find((t) => t.id === selectedTeamId) || teamsList[0] || null;
+  }, [teamsList, selectedTeamId]);
+
+  const [teamHeadCoach, setTeamHeadCoach] = useState(() => currentSelectedTeam?.headCoach || currentSelectedTeam?.coach || '');
+  const [teamArena, setTeamArena] = useState(() => currentSelectedTeam?.arena || currentSelectedTeam?.homeCourt || '');
+  const [teamRecord, setTeamRecord] = useState(() => currentSelectedTeam?.record || '');
+  const [teamDivision, setTeamDivision] = useState(() => currentSelectedTeam?.division || "Men's Premier Division");
+  const [teamSuccessMsg, setTeamSuccessMsg] = useState('');
+  const [teamErrorMsg, setTeamErrorMsg] = useState('');
+
+  const [playerToAssignId, setPlayerToAssignId] = useState('');
+  const [rosterSuccessMsg, setRosterSuccessMsg] = useState('');
+  const [rosterErrorMsg, setRosterErrorMsg] = useState('');
+
+  // Switch team and populate form inputs
+  const handleSelectTeamToEdit = (teamId) => {
+    setSelectedTeamId(teamId);
+    const targetTeam = teamsList.find((t) => t.id === teamId);
+    if (targetTeam) {
+      setTeamHeadCoach(targetTeam.headCoach || targetTeam.coach || '');
+      setTeamArena(targetTeam.arena || targetTeam.homeCourt || '');
+      setTeamRecord(targetTeam.record || '');
+      setTeamDivision(targetTeam.division || "Men's Premier Division");
+      setTeamSuccessMsg('');
+      setTeamErrorMsg('');
+    }
+  };
+
+  // Derive current team roster from team.roster and customPlayers
+  const currentTeamRoster = useMemo(() => {
+    if (!currentSelectedTeam) return [];
+    const rosterMap = new Map();
+
+    // 1. From currentSelectedTeam.roster
+    if (Array.isArray(currentSelectedTeam.roster)) {
+      currentSelectedTeam.roster.forEach((p) => {
+        if (!p) return;
+        const id = p.id || p;
+        const fullPlayer = customPlayers.find((cp) => cp.id === id) || (typeof p === 'object' ? p : null);
+        if (fullPlayer) {
+          rosterMap.set(fullPlayer.id, fullPlayer);
+        }
+      });
+    }
+
+    // 2. From customPlayers where player.team matches currentSelectedTeam
+    customPlayers.forEach((p) => {
+      const pTeam = (p.team || '').toLowerCase();
+      const tName = (currentSelectedTeam.name || '').toLowerCase();
+      const tShort = (currentSelectedTeam.shortName || '').toLowerCase();
+      if (pTeam === tName || (tShort && pTeam === tShort) || (tShort && pTeam.includes(tShort))) {
+        rosterMap.set(p.id, p);
+      }
+    });
+
+    return Array.from(rosterMap.values());
+  }, [currentSelectedTeam, customPlayers]);
+
+  // Registered players available to be assigned to this team
+  const availablePlayers = useMemo(() => {
+    const rosterIds = new Set(currentTeamRoster.map((p) => p.id));
+    return customPlayers.filter((p) => !rosterIds.has(p.id));
+  }, [customPlayers, currentTeamRoster]);
+
+  // Save Team Details
+  const handleSaveTeamDetails = (e) => {
+    e.preventDefault();
+    setTeamSuccessMsg('');
+    setTeamErrorMsg('');
+
+    if (!currentSelectedTeam) return;
+
+    if (!teamHeadCoach.trim() && !teamArena.trim() && !teamRecord.trim()) {
+      setTeamErrorMsg('Please fill in at least one team profile field.');
+      return;
+    }
+
+    const updated = {
+      ...currentSelectedTeam,
+      headCoach: teamHeadCoach.trim(),
+      coach: teamHeadCoach.trim(),
+      arena: teamArena.trim(),
+      homeCourt: teamArena.trim(),
+      record: teamRecord.trim() || '0-0',
+      division: teamDivision.trim() || "Men's Premier Division"
+    };
+
+    if (onUpdateTeam) {
+      onUpdateTeam(updated);
+    }
+    setTeamSuccessMsg(`Team details for "${updated.name}" saved successfully! Synced across all public modals.`);
+    setTimeout(() => setTeamSuccessMsg(''), 4500);
+  };
+
+  // Assign Player to Team Roster
+  const handleAssignPlayer = (e) => {
+    e.preventDefault();
+    setRosterSuccessMsg('');
+    setRosterErrorMsg('');
+
+    if (!playerToAssignId) {
+      setRosterErrorMsg('Please select a registered athlete to assign.');
+      return;
+    }
+
+    const player = customPlayers.find((p) => p.id === playerToAssignId);
+    if (!player) {
+      setRosterErrorMsg('Athlete not found in registry.');
+      return;
+    }
+
+    if (onAssignPlayerToTeam) {
+      onAssignPlayerToTeam(currentSelectedTeam.id, playerToAssignId);
+    }
+    setRosterSuccessMsg(`"${player.name}" assigned to ${currentSelectedTeam.name} active roster!`);
+    setPlayerToAssignId('');
+    setTimeout(() => setRosterSuccessMsg(''), 4500);
+  };
+
+  // Remove Player from Team Roster
+  const handleRemovePlayer = (playerId, playerName) => {
+    if (window.confirm(`Remove ${playerName} from ${currentSelectedTeam.name} active roster?`)) {
+      if (onRemovePlayerFromTeam) {
+        onRemovePlayerFromTeam(currentSelectedTeam.id, playerId);
+      }
+      setRosterSuccessMsg(`"${playerName}" removed from ${currentSelectedTeam.name} active roster.`);
+      setTimeout(() => setRosterSuccessMsg(''), 4500);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[#000000] text-white selection:bg-orange-500 selection:text-white pb-20 animate-fadeIn">
       
@@ -549,6 +809,18 @@ export default function AdminPortal({
           >
             <UserPlus className="w-4 h-4" />
             <span>Manage Players ({customPlayers.length})</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('teams')}
+            className={`px-4 py-2.5 text-xs font-black uppercase tracking-wider transition border-b-2 flex items-center space-x-2 cursor-pointer ${
+              activeTab === 'teams'
+                ? 'border-orange-500 text-orange-400 bg-neutral-900/40'
+                : 'border-transparent text-neutral-400 hover:text-white'
+            }`}
+          >
+            <Trophy className="w-4 h-4" />
+            <span>Manage Teams & Rosters ({teamsList.length})</span>
           </button>
 
           <button
@@ -637,40 +909,116 @@ export default function AdminPortal({
               )}
 
               <form onSubmit={handlePlayerSubmit} className="space-y-4">
-                {/* 1. PLAYER NAME & PHOTO URL */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-[11px] font-extrabold uppercase tracking-wider text-neutral-300 block mb-1">
-                      Player Name *
+                {/* 1. PLAYER NAME */}
+                <div>
+                  <label className="text-[11px] font-extrabold uppercase tracking-wider text-neutral-300 block mb-1">
+                    Player Name *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. Kelvin Mwita"
+                    value={playerName}
+                    onChange={(e) => setPlayerName(e.target.value)}
+                    className="w-full bg-neutral-900 border border-neutral-700 rounded-lg py-2.5 px-3 text-xs text-white focus:outline-none focus:border-orange-500 transition"
+                  />
+                </div>
+
+                {/* 2. DEDICATED PLAYER PROFILE PHOTO (DIRECT FILE UPLOAD DROPZONE / INPUT + LIVE CIRCULAR PREVIEW) */}
+                <div className="p-4 rounded-xl bg-neutral-900/70 border border-neutral-800 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[11px] font-extrabold uppercase tracking-wider text-neutral-300 flex items-center space-x-1.5">
+                      <Camera className="w-3.5 h-3.5 text-orange-500" />
+                      <span>Player Profile Photo</span>
                     </label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="e.g. Kelvin Mwita"
-                      value={playerName}
-                      onChange={(e) => setPlayerName(e.target.value)}
-                      className="w-full bg-neutral-900 border border-neutral-700 rounded-lg py-2.5 px-3 text-xs text-white focus:outline-none focus:border-orange-500 transition"
-                    />
+                    <span className="text-[10px] text-neutral-500">
+                      Auto-compressed Base64 Data URL (Max 5MB input)
+                    </span>
                   </div>
 
-                  <div>
-                    <label className="text-[11px] font-extrabold uppercase tracking-wider text-neutral-300 block mb-1">
-                      Photo URL (Avatar Image)
-                    </label>
-                    <div className="relative">
-                      <ImageIcon className="w-3.5 h-3.5 text-neutral-500 absolute left-3 top-1/2 -translate-y-1/2" />
-                      <input
-                        type="text"
-                        placeholder="e.g. https://... or /players/name.jpg"
-                        value={playerPhotoUrl}
-                        onChange={(e) => setPlayerPhotoUrl(e.target.value)}
-                        className="w-full bg-neutral-900 border border-neutral-700 rounded-lg py-2.5 pl-8 pr-3 text-xs text-white focus:outline-none focus:border-orange-500 transition"
-                      />
+                  <div className="flex items-center space-x-4">
+                    {/* LIVE CIRCULAR THUMBNAIL PREVIEW */}
+                    <div className="relative shrink-0">
+                      {playerPhotoUrl ? (
+                        <div className="relative group">
+                          <img
+                            src={playerPhotoUrl}
+                            alt="Player Preview"
+                            className="w-16 h-16 rounded-full object-cover border-2 border-[#F97316] shadow-md shadow-orange-500/20"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPlayerPhotoUrl('');
+                              if (playerPhotoFileRef.current) {
+                                playerPhotoFileRef.current.value = '';
+                              }
+                            }}
+                            title="Remove photo"
+                            className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-red-600 hover:bg-red-700 text-white flex items-center justify-center transition cursor-pointer shadow-xs"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="w-16 h-16 rounded-full bg-black border-2 border-dashed border-neutral-700 flex flex-col items-center justify-center text-neutral-500">
+                          <User className="w-6 h-6 text-neutral-600" />
+                          <span className="text-[8px] uppercase tracking-wider font-bold text-neutral-500 mt-0.5">No Photo</span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* UPLOAD CONTROLS */}
+                    <div className="flex-1 space-y-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <input
+                          ref={playerPhotoFileRef}
+                          type="file"
+                          accept="image/*"
+                          onChange={handlePlayerPhotoFileUpload}
+                          className="hidden"
+                          id="player-photo-upload-input"
+                        />
+                        <label
+                          htmlFor="player-photo-upload-input"
+                          className="px-3.5 py-2 bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 hover:border-orange-500/50 text-white rounded-lg text-xs font-bold transition flex items-center space-x-2 cursor-pointer shadow-xs"
+                        >
+                          <Upload className="w-3.5 h-3.5 text-orange-400" />
+                          <span>{playerPhotoUrl ? 'Change Photo' : 'Upload Profile Photo'}</span>
+                        </label>
+
+                        {playerPhotoUrl && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPlayerPhotoUrl('');
+                              if (playerPhotoFileRef.current) {
+                                playerPhotoFileRef.current.value = '';
+                              }
+                            }}
+                            className="px-3 py-2 bg-neutral-800/80 hover:bg-red-950/60 border border-neutral-700 hover:border-red-500/40 text-neutral-400 hover:text-red-400 rounded-lg text-xs font-bold transition cursor-pointer flex items-center space-x-1"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                            <span>Remove Photo</span>
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="relative">
+                        <LinkIcon className="w-3 h-3 text-neutral-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                        <input
+                          type="text"
+                          placeholder="Or paste external image URL (e.g. https://...)"
+                          value={playerPhotoUrl.startsWith('data:image') ? '' : playerPhotoUrl}
+                          onChange={(e) => setPlayerPhotoUrl(e.target.value)}
+                          className="w-full bg-neutral-950 border border-neutral-800 rounded-lg py-1.5 pl-7 pr-3 text-[11px] text-neutral-300 placeholder-neutral-600 focus:outline-none focus:border-orange-500 transition"
+                        />
+                      </div>
                     </div>
                   </div>
                 </div>
 
-                {/* 2. CURRENT TEAM & POSITION */}
+                {/* 3. CURRENT TEAM & POSITION */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="text-[11px] font-extrabold uppercase tracking-wider text-neutral-300 block mb-1">
@@ -864,11 +1212,16 @@ export default function AdminPortal({
                         className="flex items-center justify-between p-3 rounded-xl bg-neutral-900 border border-neutral-800 hover:border-neutral-700 transition"
                       >
                         <div className="flex items-center space-x-3 min-w-0">
-                          <div className="w-8 h-8 rounded-full bg-black text-orange-400 font-bold text-xs flex items-center justify-center border border-neutral-700 shrink-0">
-                            #{p.jersey || '-'}
-                          </div>
+                          <PlayerAvatar
+                            photoUrl={p.photoUrl || p.avatar || p.image}
+                            name={p.name}
+                            size="w-9 h-9"
+                          />
                           <div className="min-w-0">
-                            <h5 className="text-xs font-black text-white truncate">{p.name}</h5>
+                            <div className="flex items-center space-x-1.5">
+                              <span className="font-mono text-orange-400 font-bold text-xs">#{p.jersey || '00'}</span>
+                              <h5 className="text-xs font-black text-white truncate">{p.name}</h5>
+                            </div>
                             <p className="text-[10px] text-neutral-400 truncate">
                               {p.team} • {p.pos} • {p.age ? `${p.age} yrs` : '24 yrs'} • {p.height || '196 cm'} • {p.ppg} PPG
                             </p>
@@ -890,6 +1243,337 @@ export default function AdminPortal({
 
             </div>
 
+          </div>
+        )}
+
+        {/* SECTION: MANAGE TEAMS & ROSTERS */}
+        {activeTab === 'teams' && (
+          <div className="space-y-8 animate-fadeIn">
+            {/* 1. TOP TEAM SELECTION BANNER */}
+            <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6 shadow-xl">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                  <div className="flex items-center space-x-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-orange-500"></span>
+                    <span className="text-xs font-black uppercase tracking-widest text-orange-500">
+                      TEAM PROFILE & ROSTER CONFIGURATION
+                    </span>
+                  </div>
+                  <h2 className="text-xl sm:text-2xl font-black text-white uppercase tracking-tight font-sans mt-1">
+                    Manage Franchise Details & Rosters
+                  </h2>
+                  <p className="text-xs text-neutral-400 mt-1">
+                    Select any club to modify head coach, home venue, season record, and roster assignments.
+                  </p>
+                </div>
+
+                {/* Team Dropdown Selector */}
+                <div className="flex items-center space-x-3 bg-neutral-900 border border-neutral-800 rounded-xl p-2.5">
+                  <span className="text-xs font-bold text-neutral-400 uppercase tracking-wider pl-2">
+                    Select Club:
+                  </span>
+                  <select
+                    value={selectedTeamId}
+                    onChange={(e) => handleSelectTeamToEdit(e.target.value)}
+                    className="bg-black border border-neutral-700 text-white text-xs font-bold rounded-lg px-3 py-2 focus:outline-none focus:border-orange-500 cursor-pointer min-w-[200px]"
+                  >
+                    {teamsList.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name} ({t.record || '0-0'})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Quick Select Chips */}
+              <div className="flex flex-wrap gap-2 pt-4 mt-4 border-t border-neutral-900">
+                {teamsList.map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => handleSelectTeamToEdit(t.id)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center space-x-2 cursor-pointer ${
+                      selectedTeamId === t.id
+                        ? 'bg-orange-500 text-black shadow-md'
+                        : 'bg-neutral-900 text-neutral-300 hover:text-white hover:bg-neutral-800 border border-neutral-800'
+                    }`}
+                  >
+                    {t.logoUrl && (
+                      <img
+                        src={t.logoUrl}
+                        alt={t.name}
+                        className="w-4 h-4 object-contain rounded-xs"
+                      />
+                    )}
+                    <span>{t.name}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* 2. TWO-COLUMN SPLIT: LEFT (PROFILE FORM) & RIGHT (ROSTER MANAGEMENT) */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+              
+              {/* LEFT: TEAM PROFILE FORM (lg:col-span-5) */}
+              <div className="lg:col-span-5 bg-neutral-950 border border-neutral-800 rounded-2xl p-6 sm:p-7 shadow-xl space-y-6">
+                <div className="flex items-center justify-between border-b border-neutral-800 pb-4">
+                  <div className="flex items-center space-x-3.5">
+                    {currentSelectedTeam ? (
+                      <div className="w-12 h-12 rounded-xl bg-white p-1.5 flex items-center justify-center border border-neutral-700 shrink-0">
+                        <TeamCrest 
+                          team={currentSelectedTeam} 
+                          className="w-full h-full object-contain drop-shadow-xs" 
+                        />
+                      </div>
+                    ) : (
+                      <div className="w-12 h-12 rounded-xl bg-orange-500/10 border border-orange-500/30 flex items-center justify-center text-orange-500 shrink-0">
+                        <Trophy className="w-6 h-6" />
+                      </div>
+                    )}
+                    <div>
+                      <span className="text-[10px] font-black uppercase tracking-widest text-orange-500 block">
+                        FRANCHISE METADATA
+                      </span>
+                      <h3 className="text-lg font-black text-white uppercase tracking-tight">
+                        {currentSelectedTeam?.name || 'Team Details'}
+                      </h3>
+                    </div>
+                  </div>
+                </div>
+
+                {teamSuccessMsg && (
+                  <div className="p-3.5 rounded-xl bg-emerald-950/40 border border-emerald-500/50 flex items-start space-x-2.5 text-emerald-300 text-xs animate-fadeIn">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                    <span>{teamSuccessMsg}</span>
+                  </div>
+                )}
+
+                {teamErrorMsg && (
+                  <div className="p-3.5 rounded-xl bg-red-950/40 border border-red-500/50 flex items-start space-x-2.5 text-red-300 text-xs animate-fadeIn">
+                    <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                    <span>{teamErrorMsg}</span>
+                  </div>
+                )}
+
+                <form onSubmit={handleSaveTeamDetails} className="space-y-4">
+                  {/* Head Coach Name */}
+                  <div>
+                    <label className="text-xs font-bold uppercase tracking-wider text-neutral-300 block mb-1.5">
+                      Head Coach Name *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. Coach Hamisi Mussa"
+                      value={teamHeadCoach}
+                      onChange={(e) => setTeamHeadCoach(e.target.value)}
+                      className="w-full bg-neutral-900 border border-neutral-800 rounded-xl py-2.5 px-3.5 text-xs text-white placeholder-neutral-500 focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 transition"
+                    />
+                  </div>
+
+                  {/* Home Arena Name */}
+                  <div>
+                    <label className="text-xs font-bold uppercase tracking-wider text-neutral-300 block mb-1.5">
+                      Home Arena / Stadium *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. Sheikh Amri Abeid Stadium"
+                      value={teamArena}
+                      onChange={(e) => setTeamArena(e.target.value)}
+                      className="w-full bg-neutral-900 border border-neutral-800 rounded-xl py-2.5 px-3.5 text-xs text-white placeholder-neutral-500 focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 transition"
+                    />
+                  </div>
+
+                  {/* Team Record */}
+                  <div>
+                    <label className="text-xs font-bold uppercase tracking-wider text-neutral-300 block mb-1.5">
+                      Team Record (W-L) *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. 18-4"
+                      value={teamRecord}
+                      onChange={(e) => setTeamRecord(e.target.value)}
+                      className="w-full bg-neutral-900 border border-neutral-800 rounded-xl py-2.5 px-3.5 text-xs text-white placeholder-neutral-500 font-mono focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 transition"
+                    />
+                  </div>
+
+                  {/* Division / Category */}
+                  <div>
+                    <label className="text-xs font-bold uppercase tracking-wider text-neutral-300 block mb-1.5">
+                      Division / Category *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. Men's Premier Division"
+                      value={teamDivision}
+                      onChange={(e) => setTeamDivision(e.target.value)}
+                      className="w-full bg-neutral-900 border border-neutral-800 rounded-xl py-2.5 px-3.5 text-xs text-white placeholder-neutral-500 focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 transition"
+                    />
+                  </div>
+
+                  {/* Action Button: Save Team Details */}
+                  <div className="pt-2">
+                    <button
+                      type="submit"
+                      className="w-full py-3 bg-[#F97316] hover:bg-orange-600 text-black font-black uppercase text-xs tracking-wider rounded-xl transition shadow-lg shadow-orange-500/20 active:scale-[0.99] cursor-pointer flex items-center justify-center space-x-2"
+                    >
+                      <Trophy className="w-4 h-4" />
+                      <span>Save Team Details</span>
+                    </button>
+                  </div>
+                </form>
+              </div>
+
+              {/* RIGHT: ROSTER MANAGEMENT & PLAYER ASSIGNMENT (lg:col-span-7) */}
+              <div className="lg:col-span-7 space-y-6">
+                
+                {/* 1. ASSIGN PLAYER TO TEAM FORM */}
+                <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6 shadow-xl space-y-4">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-9 h-9 rounded-xl bg-orange-500/10 border border-orange-500/30 flex items-center justify-center text-orange-500 shrink-0">
+                      <UserPlus className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-black text-white uppercase tracking-tight">
+                        Assign Player to {currentSelectedTeam?.name}
+                      </h4>
+                      <p className="text-[11px] text-neutral-400">
+                        Map registered athletes from the global registry to this club roster
+                      </p>
+                    </div>
+                  </div>
+
+                  {rosterSuccessMsg && (
+                    <div className="p-3.5 rounded-xl bg-emerald-950/40 border border-emerald-500/50 flex items-start space-x-2.5 text-emerald-300 text-xs animate-fadeIn">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                      <span>{rosterSuccessMsg}</span>
+                    </div>
+                  )}
+
+                  {rosterErrorMsg && (
+                    <div className="p-3.5 rounded-xl bg-red-950/40 border border-red-500/50 flex items-start space-x-2.5 text-red-300 text-xs animate-fadeIn">
+                      <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                      <span>{rosterErrorMsg}</span>
+                    </div>
+                  )}
+
+                  <form onSubmit={handleAssignPlayer} className="flex flex-col sm:flex-row gap-3">
+                    <select
+                      value={playerToAssignId}
+                      onChange={(e) => setPlayerToAssignId(e.target.value)}
+                      className="flex-1 bg-neutral-900 border border-neutral-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-orange-500 cursor-pointer"
+                    >
+                      <option value="">-- Choose Registered Player --</option>
+                      {availablePlayers.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name} (#{p.jersey !== undefined && p.jersey !== '' ? p.jersey : (p.num || '00')}, {p.pos || p.position || 'G'}) — Current: {p.team || 'Unassigned'}
+                        </option>
+                      ))}
+                    </select>
+
+                    <button
+                      type="submit"
+                      disabled={!playerToAssignId}
+                      className="px-5 py-2.5 bg-[#F97316] hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed text-black font-black uppercase text-xs tracking-wider rounded-xl transition shadow-md flex items-center justify-center space-x-1.5 cursor-pointer shrink-0"
+                    >
+                      <Plus className="w-4 h-4" />
+                      <span>Add Player to Team</span>
+                    </button>
+                  </form>
+                </div>
+
+                {/* 2. CURRENT ACTIVE ROSTER TABLE */}
+                <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6 shadow-xl space-y-4">
+                  <div className="flex items-center justify-between border-b border-neutral-800 pb-4">
+                    <div className="flex items-center space-x-2.5">
+                      <Users className="w-4 h-4 text-orange-500" />
+                      <h4 className="text-sm font-black text-white uppercase tracking-tight">
+                        Active Roster ({currentSelectedTeam?.name})
+                      </h4>
+                    </div>
+                    <span className="text-xs font-mono font-bold px-2.5 py-0.5 rounded-full bg-orange-500/10 text-orange-400 border border-orange-500/20">
+                      {currentTeamRoster.length} Athletes
+                    </span>
+                  </div>
+
+                  {currentTeamRoster.length === 0 ? (
+                    <div className="py-12 text-center text-neutral-500 text-xs space-y-1">
+                      <p className="font-semibold text-neutral-400">
+                        No players currently assigned to {currentSelectedTeam?.name}.
+                      </p>
+                      <p className="text-[11px]">
+                        Select a registered player above and click "Add Player to Team" to populate this roster.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-xs border-collapse">
+                        <thead className="bg-neutral-900/60 font-black text-neutral-400 uppercase tracking-wider border-b border-neutral-800">
+                          <tr>
+                            <th className="py-2.5 px-3 text-center">#</th>
+                            <th className="py-2.5 px-3">Athlete</th>
+                            <th className="py-2.5 px-2 text-center">POS</th>
+                            <th className="py-2.5 px-2 text-center">Age</th>
+                            <th className="py-2.5 px-3 text-right text-orange-400">PPG</th>
+                            <th className="py-2.5 px-3 text-center">Action</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-neutral-800/60 font-medium">
+                          {currentTeamRoster.map((player) => (
+                            <tr key={player.id} className="hover:bg-neutral-900/40 transition">
+                              <td className="py-2.5 px-3 text-center font-mono font-bold text-neutral-400">
+                                #{player.jersey !== undefined && player.jersey !== '' ? player.jersey : (player.num || '00')}
+                              </td>
+                              <td className="py-2.5 px-3">
+                                <div className="flex items-center space-x-2.5">
+                                  <PlayerAvatar
+                                    photoUrl={player.photoUrl || player.avatar || player.image}
+                                    name={player.name}
+                                    size="w-7 h-7"
+                                  />
+                                  <span className="font-bold text-white text-xs">
+                                    {player.name}
+                                  </span>
+                                </div>
+                              </td>
+                              <td className="py-2.5 px-2 text-center">
+                                <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-neutral-900 text-orange-400 border border-neutral-800">
+                                  {player.pos || player.position || 'G'}
+                                </span>
+                              </td>
+                              <td className="py-2.5 px-2 text-center font-mono text-neutral-400">
+                                {player.age ? `${player.age}y` : '24y'}
+                              </td>
+                              <td className="py-2.5 px-3 text-right font-mono font-bold text-orange-400">
+                                {Number(player.ppg || 0).toFixed(1)}
+                              </td>
+                              <td className="py-2.5 px-3 text-center">
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemovePlayer(player.id, player.name)}
+                                  title="Remove from team roster"
+                                  className="p-1.5 rounded-lg bg-neutral-900 hover:bg-red-950/60 text-neutral-400 hover:text-red-400 transition cursor-pointer"
+                                >
+                                  <UserMinus className="w-3.5 h-3.5" />
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+
+              </div>
+
+            </div>
           </div>
         )}
 

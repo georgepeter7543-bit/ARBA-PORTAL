@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, Lock, Mail, UserCheck, KeyRound, AlertCircle, Shield } from 'lucide-react';
 
 export default function LoginModal({ isOpen, onClose, onAdminSuccess }) {
@@ -9,10 +9,31 @@ export default function LoginModal({ isOpen, onClose, onAdminSuccess }) {
   const [errorMsg, setErrorMsg] = useState('');
   const [isSubmitted, setIsSubmitted] = useState(false);
 
+  // Security: Reset passcode and errors whenever modal closes or sign-out event triggers
+  useEffect(() => {
+    if (!isOpen) {
+      setAdminPasscode('');
+      setErrorMsg('');
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
+    const handleSignOut = () => {
+      setAdminPasscode('');
+      setErrorMsg('');
+      setRole('fan');
+    };
+    window.addEventListener('arba_sign_out', handleSignOut);
+    return () => {
+      window.removeEventListener('arba_sign_out', handleSignOut);
+    };
+  }, []);
+
   if (!isOpen) return null;
 
   const handleRoleChange = (newRole) => {
     setRole(newRole);
+    setAdminPasscode('');
     setErrorMsg('');
   };
 
@@ -27,6 +48,8 @@ export default function LoginModal({ isOpen, onClose, onAdminSuccess }) {
         return;
       }
 
+      // Security: Clear passcode input state immediately on success
+      setAdminPasscode('');
       if (onAdminSuccess) {
         onAdminSuccess();
       }
@@ -133,6 +156,7 @@ export default function LoginModal({ isOpen, onClose, onAdminSuccess }) {
                   <input
                     type="password"
                     required
+                    autoComplete="new-password"
                     placeholder="Enter Passcode (Case-Sensitive)"
                     value={adminPasscode}
                     onChange={(e) => {
