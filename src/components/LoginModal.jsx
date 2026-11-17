@@ -9,13 +9,15 @@ export default function LoginModal({ isOpen, onClose, onAdminSuccess }) {
   const [errorMsg, setErrorMsg] = useState('');
   const [isSubmitted, setIsSubmitted] = useState(false);
 
-  // Security: Reset passcode and errors whenever modal closes or sign-out event triggers
-  useEffect(() => {
+  // Security: Reset passcode and errors whenever modal closes
+  const [prevIsOpen, setPrevIsOpen] = useState(isOpen);
+  if (prevIsOpen !== isOpen) {
+    setPrevIsOpen(isOpen);
     if (!isOpen) {
       setAdminPasscode('');
       setErrorMsg('');
     }
-  }, [isOpen]);
+  }
 
   useEffect(() => {
     const handleSignOut = () => {

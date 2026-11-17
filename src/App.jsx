@@ -105,15 +105,15 @@ export default function App() {
     };
   }, []);
 
-  // News Articles State
+  // News Articles / Bulletins State
   const [newsArticles, setNewsArticles] = useState(() => {
     try {
-      const saved = localStorage.getItem('arba_news_articles');
+      const saved = localStorage.getItem('arba_bulletins') || localStorage.getItem('arba_news_articles');
       if (saved) return JSON.parse(saved);
     } catch {
       // fallback
     }
-    return [
+    const initialNews = [
       {
         id: 'news-init-1',
         title: '2026 Arusha Regional Basketball Championship Week 2 Fixtures Confirmed',
@@ -139,7 +139,37 @@ export default function App() {
         content: 'Following stellar regular season performances, Arusha Kings and Soweto Stars have officially locked in the top seedings for the upcoming regional playoffs. Both clubs have submitted finalized active rosters.'
       }
     ];
+    try {
+      localStorage.setItem('arba_bulletins', JSON.stringify(initialNews));
+      localStorage.setItem('arba_news_articles', JSON.stringify(initialNews));
+    } catch {
+      // ignore
+    }
+    return initialNews;
   });
+
+  // Sync bulletins / news articles across tabs and components
+  useEffect(() => {
+    const handleSyncNews = () => {
+      try {
+        const saved = localStorage.getItem('arba_bulletins') || localStorage.getItem('arba_news_articles');
+        if (saved) {
+          setNewsArticles(JSON.parse(saved));
+        }
+      } catch (err) {
+        console.error('Error syncing news in App:', err);
+      }
+    };
+
+    window.addEventListener('storage', handleSyncNews);
+    window.addEventListener('arba_bulletins_updated', handleSyncNews);
+    window.addEventListener('arba_news_updated', handleSyncNews);
+    return () => {
+      window.removeEventListener('storage', handleSyncNews);
+      window.removeEventListener('arba_bulletins_updated', handleSyncNews);
+      window.removeEventListener('arba_news_updated', handleSyncNews);
+    };
+  }, []);
 
   // Persist custom players changes to localStorage (under arba_players and arba_custom_players)
   const handleAddPlayer = (newPlayer) => {
@@ -181,12 +211,14 @@ export default function App() {
     }
   };
 
-  // Persist news articles changes to localStorage
+  // Persist news articles / bulletins changes to localStorage
   const handleAddNews = (newArticle) => {
     const updated = [newArticle, ...newsArticles];
     setNewsArticles(updated);
     try {
+      localStorage.setItem('arba_bulletins', JSON.stringify(updated));
       localStorage.setItem('arba_news_articles', JSON.stringify(updated));
+      window.dispatchEvent(new Event('arba_bulletins_updated'));
       window.dispatchEvent(new Event('arba_news_updated'));
     } catch (err) {
       console.error('Failed to save news to localStorage', err);
@@ -197,7 +229,9 @@ export default function App() {
     const updated = newsArticles.map((a) => (a.id === updatedArticle.id ? updatedArticle : a));
     setNewsArticles(updated);
     try {
+      localStorage.setItem('arba_bulletins', JSON.stringify(updated));
       localStorage.setItem('arba_news_articles', JSON.stringify(updated));
+      window.dispatchEvent(new Event('arba_bulletins_updated'));
       window.dispatchEvent(new Event('arba_news_updated'));
     } catch (err) {
       console.error('Failed to update news in localStorage', err);
@@ -208,7 +242,9 @@ export default function App() {
     const updated = newsArticles.filter((a) => a.id !== articleId);
     setNewsArticles(updated);
     try {
+      localStorage.setItem('arba_bulletins', JSON.stringify(updated));
       localStorage.setItem('arba_news_articles', JSON.stringify(updated));
+      window.dispatchEvent(new Event('arba_bulletins_updated'));
       window.dispatchEvent(new Event('arba_news_updated'));
     } catch (err) {
       console.error('Failed to delete news from localStorage', err);

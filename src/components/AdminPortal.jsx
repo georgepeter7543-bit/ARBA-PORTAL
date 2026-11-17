@@ -28,7 +28,9 @@ import {
   Plus, 
   Camera, 
   User,
-  LogOut
+  LogOut,
+  FileText,
+  FileCheck
 } from 'lucide-react';
 import { TEAMS } from '../data/basketballData';
 import PlayerAvatar from './PlayerAvatar';
@@ -76,6 +78,34 @@ const compressImageFile = (file, maxWidth = 300, maxHeight = 300, quality = 0.85
   });
 };
 
+/**
+ * Read certificate document/badge (image or PDF) into Base64 Data URL,
+ * applying lightweight compression if it's an image.
+ */
+const readCertificateFile = (file) => {
+  return new Promise((resolve, reject) => {
+    if (file.size > 3 * 1024 * 1024) {
+      reject(new Error('Certificate document exceeds 3MB limit. Please upload a smaller file.'));
+      return;
+    }
+    if (file.type && file.type.startsWith('image/')) {
+      compressImageFile(file, 900, 900, 0.85)
+        .then(resolve)
+        .catch(() => {
+          const reader = new FileReader();
+          reader.onload = (e) => resolve(e.target.result);
+          reader.onerror = () => reject(new Error('Failed to read certificate image.'));
+          reader.readAsDataURL(file);
+        });
+    } else {
+      const reader = new FileReader();
+      reader.onload = (e) => resolve(e.target.result);
+      reader.onerror = () => reject(new Error('Failed to read certificate document.'));
+      reader.readAsDataURL(file);
+    }
+  });
+};
+
 const PRESET_NEWS_IMAGES = [
   { label: 'Action Play', url: 'https://images.unsplash.com/photo-1546519638-68e109498ffc?auto=format&fit=crop&w=1600&q=80' },
   { label: 'Slam Dunk', url: 'https://images.unsplash.com/photo-1519766304817-4f37bda74a29?auto=format&fit=crop&w=1600&q=80' },
@@ -87,7 +117,7 @@ const PRESET_NEWS_IMAGES = [
 export default function AdminPortal({
   customPlayers,
   onAddPlayer,
-  _onUpdatePlayer,
+  onUpdatePlayer,
   onDeletePlayer,
   teams = [],
   onUpdateTeam,
@@ -149,6 +179,7 @@ export default function AdminPortal({
   const [playerAge, setPlayerAge] = useState('');
   const [playerHeight, setPlayerHeight] = useState('');
   const [playerPpg, setPlayerPpg] = useState('');
+  const [editingPlayerId, setEditingPlayerId] = useState(null);
   const [playerSuccessMsg, setPlayerSuccessMsg] = useState('');
   const [playerErrorMsg, setPlayerErrorMsg] = useState('');
 
@@ -167,6 +198,7 @@ export default function AdminPortal({
 
   const fileInputRef = useRef(null);
   const playerPhotoFileRef = useRef(null);
+  const playerFormRef = useRef(null);
   const newsFormRef = useRef(null);
 
   // Coach Form State
@@ -174,25 +206,34 @@ export default function AdminPortal({
   const [coachPhotoUrl, setCoachPhotoUrl] = useState('');
   const [coachTeam, setCoachTeam] = useState('Arusha Kings');
   const [coachRole, setCoachRole] = useState('Head Coach');
-  const [coachLicense, setCoachLicense] = useState('FIBA Level 2');
+  const [coachLicense, setCoachLicense] = useState('FIBA Level 1 Coach');
   const [coachExp, setCoachExp] = useState('8 Years');
   const [coachRecord, setCoachRecord] = useState('');
+  const [coachCertFile, setCoachCertFile] = useState('');
+  const [coachCertFileName, setCoachCertFileName] = useState('');
   const [editingCoachId, setEditingCoachId] = useState(null);
   const [coachSuccessMsg, setCoachSuccessMsg] = useState('');
   const [coachErrorMsg, setCoachErrorMsg] = useState('');
   const coachFormRef = useRef(null);
+  const coachPhotoFileRef = useRef(null);
+  const coachCertFileRef = useRef(null);
 
   // Official Form State
   const [officialName, setOfficialName] = useState('');
   const [officialPhotoUrl, setOfficialPhotoUrl] = useState('');
   const [officialRole, setOfficialRole] = useState('Senior Floor Referee');
-  const [officialCert, setOfficialCert] = useState('National Grade A');
+  const [officialCert, setOfficialCert] = useState('TBF National Referee License');
   const [officialZone, setOfficialZone] = useState('Central Arusha Zone');
   const [officialStatus, setOfficialStatus] = useState('Active Licensed');
+  const [officialExp, setOfficialExp] = useState('6 Years');
+  const [officialCertFile, setOfficialCertFile] = useState('');
+  const [officialCertFileName, setOfficialCertFileName] = useState('');
   const [editingOfficialId, setEditingOfficialId] = useState(null);
   const [officialSuccessMsg, setOfficialSuccessMsg] = useState('');
   const [officialErrorMsg, setOfficialErrorMsg] = useState('');
   const officialFormRef = useRef(null);
+  const officialPhotoFileRef = useRef(null);
+  const officialCertFileRef = useRef(null);
 
   // Security / Passcode State
   const [currentPasscode, setCurrentPasscode] = useState('');
@@ -205,7 +246,7 @@ export default function AdminPortal({
     return !!localStorage.getItem('arba_admin_passcode');
   });
 
-  // Handle Player Submission
+  // Handle Player Submission (Add or Update)
   const handlePlayerSubmit = (e) => {
     e.preventDefault();
     setPlayerErrorMsg('');
@@ -221,26 +262,52 @@ export default function AdminPortal({
     const ageNum = parseInt(playerAge, 10) || 24;
     const heightStr = playerHeight.trim() || '196 cm / 6\'5"';
 
-    const newPlayer = {
-      id: 'player-' + Date.now(),
-      name: playerName.trim(),
-      photoUrl: playerPhotoUrl.trim() || '',
-      avatar: playerPhotoUrl.trim() || '',
-      image: playerPhotoUrl.trim() || null,
-      team: playerTeam,
-      position: playerPosition,
-      pos: playerPosition,
-      jersey: jerseyNum,
-      age: ageNum,
-      height: heightStr,
-      ppg: ppgNum,
-      status: 'Active',
-      isCustom: true,
-      createdAt: new Date().toISOString()
-    };
+    if (editingPlayerId) {
+      // UPDATE existing player
+      const updatedPlayer = {
+        id: editingPlayerId,
+        name: playerName.trim(),
+        photoUrl: playerPhotoUrl.trim() || '',
+        avatar: playerPhotoUrl.trim() || '',
+        image: playerPhotoUrl.trim() || null,
+        team: playerTeam,
+        position: playerPosition,
+        pos: playerPosition,
+        jersey: jerseyNum,
+        age: ageNum,
+        height: heightStr,
+        ppg: ppgNum,
+        status: 'Active',
+        isCustom: true,
+        updatedAt: new Date().toISOString()
+      };
 
-    onAddPlayer(newPlayer);
-    setPlayerSuccessMsg(`Player "${playerName.trim()}" successfully registered to live roster!`);
+      if (onUpdatePlayer) onUpdatePlayer(updatedPlayer);
+      setPlayerSuccessMsg(`Player "${playerName.trim()}" successfully updated!`);
+      setEditingPlayerId(null);
+    } else {
+      // ADD new player
+      const newPlayer = {
+        id: 'player-' + Date.now(),
+        name: playerName.trim(),
+        photoUrl: playerPhotoUrl.trim() || '',
+        avatar: playerPhotoUrl.trim() || '',
+        image: playerPhotoUrl.trim() || null,
+        team: playerTeam,
+        position: playerPosition,
+        pos: playerPosition,
+        jersey: jerseyNum,
+        age: ageNum,
+        height: heightStr,
+        ppg: ppgNum,
+        status: 'Active',
+        isCustom: true,
+        createdAt: new Date().toISOString()
+      };
+
+      onAddPlayer(newPlayer);
+      setPlayerSuccessMsg(`Player "${playerName.trim()}" successfully registered to live roster!`);
+    }
 
     // Reset Form
     setPlayerName('');
@@ -254,6 +321,42 @@ export default function AdminPortal({
     setPlayerPpg('');
 
     setTimeout(() => setPlayerSuccessMsg(''), 4000);
+  };
+
+  // Start Editing Player
+  const handleStartEditPlayer = (player) => {
+    setEditingPlayerId(player.id);
+    setPlayerName(player.name || '');
+    setPlayerPhotoUrl(player.photoUrl || player.avatar || player.image || '');
+    setPlayerTeam(player.team || 'Arusha Kings');
+    setPlayerPosition(player.position || player.pos || 'SF');
+    setPlayerJersey(player.jersey !== undefined && player.jersey !== '' ? String(player.jersey) : '');
+    setPlayerAge(player.age ? String(player.age) : '');
+    setPlayerHeight(player.height || '');
+    setPlayerPpg(player.ppg !== undefined && player.ppg !== '' ? String(player.ppg) : '');
+    setPlayerErrorMsg('');
+    setPlayerSuccessMsg('');
+    if (playerFormRef.current) {
+      playerFormRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  };
+
+  // Cancel Editing Player
+  const handleCancelEditPlayer = () => {
+    setEditingPlayerId(null);
+    setPlayerName('');
+    setPlayerPhotoUrl('');
+    if (playerPhotoFileRef.current) {
+      playerPhotoFileRef.current.value = '';
+    }
+    setPlayerTeam('Arusha Kings');
+    setPlayerPosition('SF');
+    setPlayerJersey('');
+    setPlayerAge('');
+    setPlayerHeight('');
+    setPlayerPpg('');
+    setPlayerErrorMsg('');
+    setPlayerSuccessMsg('');
   };
 
   // Image Upload Handler
@@ -398,15 +501,42 @@ export default function AdminPortal({
   };
 
   // COACH CRUD HANDLERS
+  const handleCoachPhotoFileUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setCoachErrorMsg('');
+    try {
+      const compressedDataUrl = await compressImageFile(file, 300, 300, 0.85);
+      setCoachPhotoUrl(compressedDataUrl);
+    } catch (err) {
+      setCoachErrorMsg(err.message || 'Failed to process coach profile photo.');
+    }
+  };
+
+  const handleCoachCertFileUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setCoachErrorMsg('');
+    try {
+      const dataUrl = await readCertificateFile(file);
+      setCoachCertFile(dataUrl);
+      setCoachCertFileName(file.name);
+    } catch (err) {
+      setCoachErrorMsg(err.message || 'Failed to upload certificate document.');
+    }
+  };
+
   const handleStartEditCoach = (coach) => {
     setEditingCoachId(coach.id);
     setCoachName(coach.name || '');
-    setCoachPhotoUrl(coach.image || '');
-    setCoachTeam(coach.team || 'Arusha Kings');
+    setCoachPhotoUrl(coach.photoUrl || coach.image || coach.avatar || '');
+    setCoachTeam(coach.teamOrZone || coach.team || 'Arusha Kings');
     setCoachRole(coach.role || 'Head Coach');
-    setCoachLicense(coach.certification || coach.license || 'FIBA Level 2');
-    setCoachExp(coach.exp || coach.experience || '8 Years');
+    setCoachLicense(coach.certificateTitle || coach.certification || coach.license || 'FIBA Level 1 Coach');
+    setCoachExp(coach.experience || coach.exp || '8 Years');
     setCoachRecord(coach.record || '');
+    setCoachCertFile(coach.certificateFile || '');
+    setCoachCertFileName(coach.certificateFileName || '');
     setCoachErrorMsg('');
     setCoachSuccessMsg('');
     if (coachFormRef.current) {
@@ -420,9 +550,13 @@ export default function AdminPortal({
     setCoachPhotoUrl('');
     setCoachTeam('Arusha Kings');
     setCoachRole('Head Coach');
-    setCoachLicense('FIBA Level 2');
+    setCoachLicense('FIBA Level 1 Coach');
     setCoachExp('8 Years');
     setCoachRecord('');
+    setCoachCertFile('');
+    setCoachCertFileName('');
+    if (coachPhotoFileRef.current) coachPhotoFileRef.current.value = '';
+    if (coachCertFileRef.current) coachCertFileRef.current.value = '';
     setCoachErrorMsg('');
     setCoachSuccessMsg('');
   };
@@ -437,17 +571,26 @@ export default function AdminPortal({
       return;
     }
 
+    const certTitle = coachLicense.trim() || 'FIBA Level 1 Coach';
+    const coachExpVal = coachExp.trim() || '5 Years';
+
     if (editingCoachId) {
       const updated = {
         id: editingCoachId,
         name: coachName.trim(),
+        photoUrl: coachPhotoUrl.trim() || '',
         image: coachPhotoUrl.trim() || null,
+        avatar: coachPhotoUrl.trim() || null,
+        teamOrZone: coachTeam,
         team: coachTeam,
         role: coachRole,
-        certification: coachLicense,
-        license: coachLicense,
-        exp: coachExp.trim() || '5 Years',
-        experience: coachExp.trim() || '5 Years',
+        certificateTitle: certTitle,
+        certification: certTitle,
+        license: certTitle,
+        certificateFile: coachCertFile || '',
+        certificateFileName: coachCertFileName || '',
+        experience: coachExpVal,
+        exp: coachExpVal,
         record: coachRecord.trim() || 'Active Staff',
         updatedAt: new Date().toISOString()
       };
@@ -458,13 +601,19 @@ export default function AdminPortal({
       const newCoach = {
         id: 'coach-' + Date.now(),
         name: coachName.trim(),
+        photoUrl: coachPhotoUrl.trim() || '',
         image: coachPhotoUrl.trim() || null,
+        avatar: coachPhotoUrl.trim() || null,
+        teamOrZone: coachTeam,
         team: coachTeam,
         role: coachRole,
-        certification: coachLicense,
-        license: coachLicense,
-        exp: coachExp.trim() || '5 Years',
-        experience: coachExp.trim() || '5 Years',
+        certificateTitle: certTitle,
+        certification: certTitle,
+        license: certTitle,
+        certificateFile: coachCertFile || '',
+        certificateFileName: coachCertFileName || '',
+        experience: coachExpVal,
+        exp: coachExpVal,
         record: coachRecord.trim() || 'Active Staff',
         createdAt: new Date().toISOString()
       };
@@ -475,18 +624,50 @@ export default function AdminPortal({
     setCoachName('');
     setCoachPhotoUrl('');
     setCoachRecord('');
+    setCoachCertFile('');
+    setCoachCertFileName('');
+    if (coachPhotoFileRef.current) coachPhotoFileRef.current.value = '';
+    if (coachCertFileRef.current) coachCertFileRef.current.value = '';
     setTimeout(() => setCoachSuccessMsg(''), 4000);
   };
 
   // OFFICIAL CRUD HANDLERS
+  const handleOfficialPhotoFileUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setOfficialErrorMsg('');
+    try {
+      const compressedDataUrl = await compressImageFile(file, 300, 300, 0.85);
+      setOfficialPhotoUrl(compressedDataUrl);
+    } catch (err) {
+      setOfficialErrorMsg(err.message || 'Failed to process official profile photo.');
+    }
+  };
+
+  const handleOfficialCertFileUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setOfficialErrorMsg('');
+    try {
+      const dataUrl = await readCertificateFile(file);
+      setOfficialCertFile(dataUrl);
+      setOfficialCertFileName(file.name);
+    } catch (err) {
+      setOfficialErrorMsg(err.message || 'Failed to upload certificate document.');
+    }
+  };
+
   const handleStartEditOfficial = (official) => {
     setEditingOfficialId(official.id);
     setOfficialName(official.name || '');
-    setOfficialPhotoUrl(official.image || '');
+    setOfficialPhotoUrl(official.photoUrl || official.image || official.avatar || '');
     setOfficialRole(official.role || 'Senior Floor Referee');
-    setOfficialCert(official.certification || official.badge || 'National Grade A');
-    setOfficialZone(official.zone || 'Central Arusha Zone');
+    setOfficialCert(official.certificateTitle || official.certification || official.badge || 'TBF National Referee License');
+    setOfficialZone(official.teamOrZone || official.zone || 'Central Arusha Zone');
     setOfficialStatus(official.status || 'Active Licensed');
+    setOfficialExp(official.experience || official.exp || '6 Years');
+    setOfficialCertFile(official.certificateFile || '');
+    setOfficialCertFileName(official.certificateFileName || '');
     setOfficialErrorMsg('');
     setOfficialSuccessMsg('');
     if (officialFormRef.current) {
@@ -499,9 +680,14 @@ export default function AdminPortal({
     setOfficialName('');
     setOfficialPhotoUrl('');
     setOfficialRole('Senior Floor Referee');
-    setOfficialCert('National Grade A');
+    setOfficialCert('TBF National Referee License');
     setOfficialZone('Central Arusha Zone');
     setOfficialStatus('Active Licensed');
+    setOfficialExp('6 Years');
+    setOfficialCertFile('');
+    setOfficialCertFileName('');
+    if (officialPhotoFileRef.current) officialPhotoFileRef.current.value = '';
+    if (officialCertFileRef.current) officialCertFileRef.current.value = '';
     setOfficialErrorMsg('');
     setOfficialSuccessMsg('');
   };
@@ -516,15 +702,27 @@ export default function AdminPortal({
       return;
     }
 
+    const certTitle = officialCert.trim() || 'TBF National Referee License';
+    const zoneVal = officialZone.trim() || 'Central Arusha Zone';
+    const expVal = officialExp.trim() || '6 Years';
+
     if (editingOfficialId) {
       const updated = {
         id: editingOfficialId,
         name: officialName.trim(),
+        photoUrl: officialPhotoUrl.trim() || '',
         image: officialPhotoUrl.trim() || null,
+        avatar: officialPhotoUrl.trim() || null,
+        teamOrZone: zoneVal,
+        zone: zoneVal,
         role: officialRole,
-        certification: officialCert,
-        badge: officialCert,
-        zone: officialZone.trim() || 'Central Arusha Zone',
+        certificateTitle: certTitle,
+        certification: certTitle,
+        badge: certTitle,
+        certificateFile: officialCertFile || '',
+        certificateFileName: officialCertFileName || '',
+        experience: expVal,
+        exp: expVal,
         status: officialStatus,
         updatedAt: new Date().toISOString()
       };
@@ -535,11 +733,19 @@ export default function AdminPortal({
       const newOfficial = {
         id: 'official-' + Date.now(),
         name: officialName.trim(),
+        photoUrl: officialPhotoUrl.trim() || '',
         image: officialPhotoUrl.trim() || null,
+        avatar: officialPhotoUrl.trim() || null,
+        teamOrZone: zoneVal,
+        zone: zoneVal,
         role: officialRole,
-        certification: officialCert,
-        badge: officialCert,
-        zone: officialZone.trim() || 'Central Arusha Zone',
+        certificateTitle: certTitle,
+        certification: certTitle,
+        badge: certTitle,
+        certificateFile: officialCertFile || '',
+        certificateFileName: officialCertFileName || '',
+        experience: expVal,
+        exp: expVal,
         status: officialStatus,
         createdAt: new Date().toISOString()
       };
@@ -549,6 +755,10 @@ export default function AdminPortal({
 
     setOfficialName('');
     setOfficialPhotoUrl('');
+    setOfficialCertFile('');
+    setOfficialCertFileName('');
+    if (officialPhotoFileRef.current) officialPhotoFileRef.current.value = '';
+    if (officialCertFileRef.current) officialCertFileRef.current.value = '';
     setTimeout(() => setOfficialSuccessMsg(''), 4000);
   };
 
@@ -754,6 +964,11 @@ export default function AdminPortal({
     }
   };
 
+  // Immediate lock check: prevent rendering any admin controls if locked
+  if (isLocked) {
+    return null;
+  }
+
   return (
     <div className="min-h-screen bg-[#000000] text-white selection:bg-orange-500 selection:text-white pb-20 animate-fadeIn">
       
@@ -787,6 +1002,16 @@ export default function AdminPortal({
           </div>
 
           <div className="flex items-center space-x-3 self-end md:self-auto">
+            {onSignOut && (
+              <button
+                onClick={onSignOut}
+                className="px-3.5 py-2 bg-red-950/40 hover:bg-red-900/60 text-red-300 hover:text-red-200 border border-red-800/60 text-xs font-bold rounded-lg transition flex items-center space-x-1.5 cursor-pointer shadow-xs"
+                title="Sign out of Admin Session"
+              >
+                <LogOut className="w-3.5 h-3.5 text-red-400" />
+                <span>Sign Out</span>
+              </button>
+            )}
             <button
               onClick={onExitAdmin}
               className="px-4 py-2 bg-neutral-900 hover:bg-neutral-800 text-neutral-200 hover:text-white border border-neutral-700 text-xs font-bold rounded-lg transition flex items-center space-x-1.5 cursor-pointer"
@@ -881,17 +1106,32 @@ export default function AdminPortal({
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
             
             {/* LEFT: FORM */}
-            <div className="lg:col-span-7 bg-neutral-950 border border-neutral-800 rounded-2xl p-6 sm:p-8 shadow-xl space-y-6">
-              <div>
-                <span className="text-xs font-black uppercase tracking-widest text-orange-500">
-                  ROSTER REGISTRATION
-                </span>
-                <h2 className="text-xl sm:text-2xl font-black text-white uppercase tracking-tight font-sans mt-1">
-                  Add Player to Live Directory
-                </h2>
-                <p className="text-xs text-neutral-400 mt-1">
-                  Registered players immediately become visible across the platform's Live Player Directory, search index, and statistical leaderboards.
-                </p>
+            <div ref={playerFormRef} className="lg:col-span-7 bg-neutral-950 border border-neutral-800 rounded-2xl p-6 sm:p-8 shadow-xl space-y-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-xs font-black uppercase tracking-widest text-orange-500">
+                    {editingPlayerId ? 'EDIT PLAYER PROFILE' : 'ROSTER REGISTRATION'}
+                  </span>
+                  <h2 className="text-xl sm:text-2xl font-black text-white uppercase tracking-tight font-sans mt-1">
+                    {editingPlayerId ? 'Update Player Details' : 'Add Player to Live Directory'}
+                  </h2>
+                  <p className="text-xs text-neutral-400 mt-1">
+                    {editingPlayerId
+                      ? 'Update the player details below. Changes immediately sync to the public Players table and Team Roster modals.'
+                      : 'Registered players immediately become visible across the platform\'s Live Player Directory, search index, and statistical leaderboards.'}
+                  </p>
+                </div>
+
+                {editingPlayerId && (
+                  <button
+                    type="button"
+                    onClick={handleCancelEditPlayer}
+                    className="ml-4 px-3 py-1.5 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 hover:text-white border border-neutral-700 text-[10px] font-bold rounded-lg transition flex items-center space-x-1 cursor-pointer shrink-0"
+                  >
+                    <X className="w-3 h-3" />
+                    <span>Cancel</span>
+                  </button>
+                )}
               </div>
 
               {playerSuccessMsg && (
@@ -1124,13 +1364,33 @@ export default function AdminPortal({
                   </p>
                 </div>
 
-                <button
-                  type="submit"
-                  className="w-full py-3 bg-orange-500 hover:bg-orange-600 text-black font-extrabold text-xs uppercase tracking-wider rounded-lg transition shadow-md active:scale-98 cursor-pointer flex items-center justify-center space-x-2 mt-4"
-                >
-                  <UserPlus className="w-4 h-4" />
-                  <span>Register Player to Live Roster</span>
-                </button>
+                {/* 5. ACTION BUTTONS */}
+                {editingPlayerId ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+                    <button
+                      type="submit"
+                      className="py-3 bg-orange-500 hover:bg-orange-600 text-black font-extrabold text-xs uppercase tracking-wider rounded-lg transition shadow-md active:scale-98 cursor-pointer flex items-center justify-center space-x-2"
+                    >
+                      <Pencil className="w-4 h-4" />
+                      <span>Update Player</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleCancelEditPlayer}
+                      className="py-3 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 hover:text-white border border-neutral-700 font-extrabold text-xs uppercase tracking-wider rounded-lg transition cursor-pointer"
+                    >
+                      Cancel Edit
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="submit"
+                    className="w-full py-3 bg-orange-500 hover:bg-orange-600 text-black font-extrabold text-xs uppercase tracking-wider rounded-lg transition shadow-md active:scale-98 cursor-pointer flex items-center justify-center space-x-2 mt-4"
+                  >
+                    <UserPlus className="w-4 h-4" />
+                    <span>Register Player to Live Roster</span>
+                  </button>
+                )}
               </form>
             </div>
 
@@ -1206,37 +1466,62 @@ export default function AdminPortal({
                   </p>
                 ) : (
                   <div className="space-y-2.5 max-h-96 overflow-y-auto pr-1">
-                    {customPlayers.map((p) => (
-                      <div
-                        key={p.id}
-                        className="flex items-center justify-between p-3 rounded-xl bg-neutral-900 border border-neutral-800 hover:border-neutral-700 transition"
-                      >
-                        <div className="flex items-center space-x-3 min-w-0">
-                          <PlayerAvatar
-                            photoUrl={p.photoUrl || p.avatar || p.image}
-                            name={p.name}
-                            size="w-9 h-9"
-                          />
-                          <div className="min-w-0">
-                            <div className="flex items-center space-x-1.5">
-                              <span className="font-mono text-orange-400 font-bold text-xs">#{p.jersey || '00'}</span>
-                              <h5 className="text-xs font-black text-white truncate">{p.name}</h5>
+                    {customPlayers.map((p) => {
+                      const isCurrentlyEditing = editingPlayerId === p.id;
+
+                      return (
+                        <div
+                          key={p.id}
+                          className={`flex items-center justify-between p-3 rounded-xl border transition ${
+                            isCurrentlyEditing
+                              ? 'bg-orange-950/20 border-orange-500/80 ring-1 ring-orange-500/50'
+                              : 'bg-neutral-900 border-neutral-800 hover:border-neutral-700'
+                          }`}
+                        >
+                          <div className="flex items-center space-x-3 min-w-0">
+                            <PlayerAvatar
+                              photoUrl={p.photoUrl || p.avatar || p.image}
+                              name={p.name}
+                              size="w-9 h-9"
+                            />
+                            <div className="min-w-0">
+                              <div className="flex items-center space-x-1.5">
+                                <span className="font-mono text-orange-400 font-bold text-xs">#{p.jersey || '00'}</span>
+                                <h5 className="text-xs font-black text-white truncate">{p.name}</h5>
+                              </div>
+                              <p className="text-[10px] text-neutral-400 truncate">
+                                {p.team} • {p.pos} • {p.age ? `${p.age} yrs` : '24 yrs'} • {p.height || '196 cm'} • {p.ppg} PPG
+                              </p>
                             </div>
-                            <p className="text-[10px] text-neutral-400 truncate">
-                              {p.team} • {p.pos} • {p.age ? `${p.age} yrs` : '24 yrs'} • {p.height || '196 cm'} • {p.ppg} PPG
-                            </p>
+                          </div>
+
+                          <div className="flex items-center space-x-1.5 shrink-0">
+                            {isCurrentlyEditing ? (
+                              <span className="text-[10px] font-bold text-orange-400 flex items-center space-x-1 mr-1">
+                                <Sparkles className="w-3 h-3" />
+                                <span>Editing</span>
+                              </span>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => handleStartEditPlayer(p)}
+                                title="Edit Player"
+                                className="p-1.5 text-neutral-500 hover:text-orange-400 hover:bg-neutral-800 rounded transition cursor-pointer"
+                              >
+                                <Pencil className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                            <button
+                              onClick={() => onDeletePlayer(p.id)}
+                              title="Remove Player from Directory"
+                              className="p-1.5 text-neutral-500 hover:text-red-400 hover:bg-neutral-800 rounded transition cursor-pointer"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
                           </div>
                         </div>
-
-                        <button
-                          onClick={() => onDeletePlayer(p.id)}
-                          title="Remove Player from Directory"
-                          className="p-1.5 text-neutral-500 hover:text-red-400 hover:bg-neutral-800 rounded transition cursor-pointer"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
